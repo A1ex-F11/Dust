@@ -1,0 +1,21 @@
+# Unreal generated files
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+.vs/
+*.sln
+*.slnx
+*.VC.db
+*.VC.opendb
+
+# Source-only repository scope
+Content/
+Plugins/
+Config/DefaultEditorPerProjectUserSettings.ini
+
+# Local credentials and temporary files
+.env
+.env.*
+*.log
+*.tmp

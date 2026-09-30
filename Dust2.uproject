@@ -1,0 +1,44 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": "5.8",
+  "Category": "",
+  "Description": "",
+  "Modules": [
+    {
+      "Name": "Dust2",
+      "Type": "Runtime",
+      "LoadingPhase": "Default",
+      "AdditionalDependencies": [
+        "Engine"
+      ]
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "ModelingToolsEditorMode",
+      "Enabled": true,
+      "TargetAllowList": [
+        "Editor"
+      ]
+    },
+    {
+      "Name": "GameplayStateTree",
+      "Enabled": true
+    },
+    {
+      "Name": "Tripo3DUEBridge",
+      "Enabled": false,
+      "SupportedTargetPlatforms": [
+        "Win64"
+      ]
+    },
+    {
+      "Name": "AutomatedPerfTesting",
+      "Enabled": true
+    },
+    {
+      "Name": "FunctionalTestingEditor",
+      "Enabled": true
+    }
+  ]
+}
