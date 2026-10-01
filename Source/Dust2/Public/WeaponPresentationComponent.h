@@ -8,6 +8,7 @@
 
 class AWeaponRuntime;
 class UChildActorComponent;
+class USkeletalMeshComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FWeaponPresentationSignal);
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
@@ -27,7 +28,7 @@ UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
 	bool FindWeaponPresentationProfile(
 		AWeaponRuntime* FormalWeapon,
 		FWeaponPresentationProfile& OutProfile) const;
-	UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
+UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
 	UAnimMontage* ResolveWeaponFireMontage(
 		AWeaponRuntime* FormalWeapon,
 		UAnimMontage* DefaultFireMontage) const;
@@ -35,6 +36,10 @@ UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
 	AActor* TryInitializeVisualWeapon(
 		AWeaponRuntime* FormalWeapon,
 		UChildActorComponent* VisualWeaponComponent);
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+	void PlayPresentationMontage(
+		USkeletalMeshComponent* Mesh,
+		UAnimMontage* Montage);
 protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
 		Category = "Weapon Presentation|Configuration",

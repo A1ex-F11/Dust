@@ -1,4 +1,5 @@
-
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
 #include "WeaponPresentationComponent.h"
 #include "Components/ChildActorComponent.h"
 #include "WeaponRuntime.h"
@@ -155,4 +156,26 @@ UAnimMontage* UWeaponPresentationComponent::ResolveWeaponFireMontage(
 	}
 
 	return DefaultFireMontage;
+}
+void UWeaponPresentationComponent::PlayPresentationMontage(
+	USkeletalMeshComponent* Mesh,
+	UAnimMontage* Montage)
+{
+	if (!IsValid(Mesh) || !IsValid(Montage))
+	{
+		return;
+	}
+
+	UAnimInstance* AnimInstance = Mesh->GetAnimInstance();
+	if (!IsValid(AnimInstance))
+	{
+		return;
+	}
+
+	AnimInstance->Montage_Play(
+		Montage,
+		1.0f,
+		EMontagePlayReturnType::MontageLength,
+		0.0f,
+		true);
 }
