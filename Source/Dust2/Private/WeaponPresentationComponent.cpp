@@ -1,6 +1,6 @@
 
-#include "Animation/AnimInstance.h"
 #include "WeaponPresentationComponent.h"
+#include "Animation/AnimInstance.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/ChildActorComponent.h"
 #include "WeaponRuntime.h"
@@ -139,10 +139,6 @@ UAnimMontage* UWeaponPresentationComponent::ResolveWeaponFireMontage(
 	AWeaponRuntime* FormalWeapon,
 	UAnimMontage* DefaultFireMontage) const
 {
-	if (!IsValid(FormalWeapon))
-	{
-		return DefaultFireMontage;
-	}
 
 	FWeaponPresentationProfile Profile;
 	if (!FindWeaponPresentationProfile(FormalWeapon, Profile))

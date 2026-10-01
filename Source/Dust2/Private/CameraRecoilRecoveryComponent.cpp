@@ -8,8 +8,7 @@
 // Sets default values for this component's properties
 UCameraRecoilRecoveryComponent::UCameraRecoilRecoveryComponent()
 {
-	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
-	// off to improve performance if you don't need them.
+	// Recovery uses timers; per-frame component ticking is disabled.
 	PrimaryComponentTick.bCanEverTick = false;
 	PrimaryComponentTick.bStartWithTickEnabled = false;
 	MaxPitchOffset = 3.0f;
