@@ -1,6 +1,7 @@
-#include "Components/SkeletalMeshComponent.h"
+
 #include "Animation/AnimInstance.h"
 #include "WeaponPresentationComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/ChildActorComponent.h"
 #include "WeaponRuntime.h"
 
@@ -178,4 +179,34 @@ void UWeaponPresentationComponent::PlayPresentationMontage(
 		EMontagePlayReturnType::MontageLength,
 		0.0f,
 		true);
+}
+void UWeaponPresentationComponent::PlayFirePresentation(
+	AWeaponRuntime* FormalWeapon,
+	USkeletalMeshComponent* CharacterMesh,
+	UAnimMontage* CharacterFireMontage,
+	USkeletalMeshComponent* WeaponMesh,
+	UAnimMontage* DefaultWeaponFireMontage)
+{
+	if (!IsValid(FormalWeapon) ||
+		FormalWeapon != BoundWeapon.Get())
+	{
+		return;
+	}
+
+	UAnimMontage* WeaponFireMontage =
+		ResolveWeaponFireMontage(
+			FormalWeapon,
+			DefaultWeaponFireMontage);
+
+	OnRecoilPresentationRequested.Broadcast();
+
+	PlayPresentationMontage(
+		CharacterMesh,
+		CharacterFireMontage);
+
+	OnFireEffectsPresentationRequested.Broadcast();
+
+	PlayPresentationMontage(
+		WeaponMesh,
+		WeaponFireMontage);
 }

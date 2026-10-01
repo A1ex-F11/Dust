@@ -28,10 +28,22 @@ UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
 	bool FindWeaponPresentationProfile(
 		AWeaponRuntime* FormalWeapon,
 		FWeaponPresentationProfile& OutProfile) const;
+UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+	FWeaponPresentationSignal OnRecoilPresentationRequested;
+
+UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+	FWeaponPresentationSignal OnFireEffectsPresentationRequested;
 UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
 	UAnimMontage* ResolveWeaponFireMontage(
 		AWeaponRuntime* FormalWeapon,
 		UAnimMontage* DefaultFireMontage) const;
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+	void PlayFirePresentation(
+		AWeaponRuntime* FormalWeapon,
+		USkeletalMeshComponent* CharacterMesh,
+		UAnimMontage* CharacterFireMontage,
+		USkeletalMeshComponent* WeaponMesh,
+		UAnimMontage* DefaultWeaponFireMontage);
 UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
 	AActor* TryInitializeVisualWeapon(
 		AWeaponRuntime* FormalWeapon,
