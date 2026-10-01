@@ -27,6 +27,10 @@ UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
 	bool FindWeaponPresentationProfile(
 		AWeaponRuntime* FormalWeapon,
 		FWeaponPresentationProfile& OutProfile) const;
+	UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
+	UAnimMontage* ResolveWeaponFireMontage(
+		AWeaponRuntime* FormalWeapon,
+		UAnimMontage* DefaultFireMontage) const;
 UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
 	AActor* TryInitializeVisualWeapon(
 		AWeaponRuntime* FormalWeapon,

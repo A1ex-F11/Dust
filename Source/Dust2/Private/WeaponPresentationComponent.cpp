@@ -133,3 +133,26 @@ AActor* UWeaponPresentationComponent::TryInitializeVisualWeapon(
 
 	return VisualWeapon;
 }
+UAnimMontage* UWeaponPresentationComponent::ResolveWeaponFireMontage(
+	AWeaponRuntime* FormalWeapon,
+	UAnimMontage* DefaultFireMontage) const
+{
+	if (!IsValid(FormalWeapon))
+	{
+		return DefaultFireMontage;
+	}
+
+	FWeaponPresentationProfile Profile;
+	if (!FindWeaponPresentationProfile(FormalWeapon, Profile))
+	{
+		return DefaultFireMontage;
+	}
+
+	if (FormalWeapon->GetCurrentAmmo() == 0 &&
+		IsValid(Profile.EmptyFireWeaponMontage.Get()))
+	{
+		return Profile.EmptyFireWeaponMontage.Get();
+	}
+
+	return DefaultFireMontage;
+}
