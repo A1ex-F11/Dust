@@ -298,3 +298,26 @@ void UWeaponPresentationComponent::PlayReloadPresentationAudio(
 		AudioComponent->Play(0.0f);
 	}
 }
+bool UWeaponPresentationComponent::ShouldCompleteReloadPresentation(
+	bool bCompletionAllowed,
+	AWeaponRuntime* ReloadingWeapon,
+	AWeaponRuntime* CurrentWeapon,
+	int32 ExpectedReloadRequestId) const
+{
+	if (!bCompletionAllowed ||
+		!IsValid(ReloadingWeapon) ||
+		!IsValid(CurrentWeapon))
+	{
+		return false;
+	}
+
+	if (ReloadingWeapon != CurrentWeapon ||
+		!ReloadingWeapon->IsReloading())
+	{
+		return false;
+	}
+
+	return ExpectedReloadRequestId > 0 &&
+		ReloadingWeapon->GetReloadRequestId() ==
+		ExpectedReloadRequestId;
+}
