@@ -4,6 +4,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/ChildActorComponent.h"
 #include "Components/AudioComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "WeaponRuntime.h"
 
 UWeaponPresentationComponent::UWeaponPresentationComponent()
@@ -23,6 +24,12 @@ void UWeaponPresentationComponent::SetWeaponForPresentation(
 	{
 		return;
 	}
+	if (BoundWeapon.Get() == NewWeapon)
+	{
+		return;
+	}
+
+	StopReloadPresentationSounds();
 	if (AWeaponRuntime* OldWeapon = BoundWeapon.Get())
 	{
 		OldWeapon->OnFireCommitted.RemoveDynamic(
@@ -45,6 +52,7 @@ void UWeaponPresentationComponent::SetWeaponForPresentation(
 			this,
 			&UWeaponPresentationComponent::HandleReloadStarted);
 	}
+
 }
 void UWeaponPresentationComponent::HandleFireCommitted()
 {
@@ -53,14 +61,15 @@ void UWeaponPresentationComponent::HandleFireCommitted()
 
 void UWeaponPresentationComponent::HandleReloadStarted()
 {
+	StopReloadPresentationSounds();
 	OnReloadPresentationRequested.Broadcast();
 }
 void UWeaponPresentationComponent::EndPlay(
 	const EEndPlayReason::Type EndPlayReason)
 {
+	StopReloadPresentationSounds();
 	SetWeaponForPresentation(nullptr);
 	BoundWeapon.Reset();
-
 	Super::EndPlay(EndPlayReason);
 }
 bool UWeaponPresentationComponent::FindWeaponPresentationProfile(
@@ -290,6 +299,15 @@ void UWeaponPresentationComponent::PlayReloadPresentationAudio(
 		return;
 	}
 
+	if (UAudioComponent* Previous = ActiveReloadAudioComponent.Get())
+	{
+		if (Previous != AudioComponent)
+		{
+			Previous->Stop();
+		}
+	}
+
+	ActiveReloadAudioComponent = AudioComponent;
 	AudioComponent->Stop();
 	AudioComponent->SetSound(Sound);
 
@@ -298,6 +316,7 @@ void UWeaponPresentationComponent::PlayReloadPresentationAudio(
 		AudioComponent->Play(0.0f);
 	}
 }
+
 bool UWeaponPresentationComponent::ShouldCompleteReloadPresentation(
 	bool bCompletionAllowed,
 	AWeaponRuntime* ReloadingWeapon,
@@ -338,4 +357,91 @@ bool UWeaponPresentationComponent::TryCommitReloadPresentationRound(
 
 	return ReloadingWeapon->TryCommitReloadRound(
 		ExpectedReloadRequestId);
+}
+bool UWeaponPresentationComponent::HandleReloadPresentationNotify(
+	FName NotifyName,
+	USceneComponent* AttachToComponent,
+	bool bCompletionAllowed,
+	AWeaponRuntime* ReloadingWeapon,
+	AWeaponRuntime* CurrentWeapon,
+	int32 ExpectedReloadRequestId)
+{
+	if (!ShouldCompleteReloadPresentation(
+		bCompletionAllowed,
+		ReloadingWeapon,
+		CurrentWeapon,
+		ExpectedReloadRequestId))
+	{
+		return false;
+	}
+
+	FWeaponPresentationProfile Profile;
+	if (!FindWeaponPresentationProfile(ReloadingWeapon, Profile))
+	{
+		return false;
+	}
+
+	ReloadNotifyAudioComponents.RemoveAll(
+		[](const TObjectPtr<UAudioComponent>& Audio)
+		{
+			return !IsValid(Audio.Get());
+		});
+
+	if (const TObjectPtr<USoundBase>* Sound =
+		Profile.ReloadNotifySounds.Find(NotifyName))
+	{
+		if (IsValid(Sound->Get()) && IsValid(AttachToComponent))
+		{
+			UAudioComponent* SpawnedAudio =
+				UGameplayStatics::SpawnSoundAttached(
+					Sound->Get(),
+					AttachToComponent,
+					NAME_None,
+					FVector::ZeroVector,
+					FRotator::ZeroRotator,
+					EAttachLocation::KeepRelativeOffset,
+					false,
+					1.0f,
+					1.0f,
+					0.0f,
+					nullptr,
+					nullptr,
+					true);
+
+			if (IsValid(SpawnedAudio))
+			{
+				ReloadNotifyAudioComponents.Add(SpawnedAudio);
+			}
+		}
+	}
+	if (!Profile.ReloadRoundCommitNotifyName.IsNone() &&
+		NotifyName == Profile.ReloadRoundCommitNotifyName)
+	{
+		return TryCommitReloadPresentationRound(
+			bCompletionAllowed,
+			ReloadingWeapon,
+			CurrentWeapon,
+			ExpectedReloadRequestId);
+	}
+
+	return false;
+}
+
+void UWeaponPresentationComponent::StopReloadPresentationSounds()
+{
+	if (UAudioComponent* Audio = ActiveReloadAudioComponent.Get())
+	{
+		Audio->Stop();
+	}
+	ActiveReloadAudioComponent.Reset();
+
+	for (const TObjectPtr<UAudioComponent>& Audio :
+		ReloadNotifyAudioComponents)
+	{
+		if (IsValid(Audio.Get()))
+		{
+			Audio->Stop();
+		}
+	}
+	ReloadNotifyAudioComponents.Reset();
 }

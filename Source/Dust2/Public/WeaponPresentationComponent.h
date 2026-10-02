@@ -9,6 +9,7 @@
 class AWeaponRuntime;
 class UChildActorComponent;
 class USkeletalMeshComponent;
+class USceneComponent;
 class UAudioComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FWeaponPresentationSignal);
@@ -76,6 +77,17 @@ UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
 		AWeaponRuntime* ReloadingWeapon,
 		AWeaponRuntime* CurrentWeapon,
 		int32 ExpectedReloadRequestId);
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
+		meta = (ReturnDisplayName = "Round Committed"))
+	bool HandleReloadPresentationNotify(
+		FName NotifyName,
+		USceneComponent* AttachToComponent,
+		bool bCompletionAllowed,
+		AWeaponRuntime* ReloadingWeapon,
+		AWeaponRuntime* CurrentWeapon,
+		int32 ExpectedReloadRequestId);
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+	void StopReloadPresentationSounds();
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
 	FWeaponPresentationSignal OnFirePresentationRequested;
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
@@ -101,6 +113,10 @@ private:
 
 UPROPERTY(Transient)
 	TWeakObjectPtr<AWeaponRuntime> BoundWeapon;
+UPROPERTY(Transient)
+	TArray<TObjectPtr<UAudioComponent>> ReloadNotifyAudioComponents;
+UPROPERTY(Transient)
+	TWeakObjectPtr<UAudioComponent> ActiveReloadAudioComponent;
 UFUNCTION()
 	void HandleFireCommitted();
 UFUNCTION()

@@ -52,6 +52,13 @@ struct DUST2_API FWeaponPresentationProfile
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reload",
 		meta = (DisplayName = "按装弹数量选择的换弹变体"))
 	TArray<FWeaponReloadVariant> ReloadVariants;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reload",
+		meta = (DisplayName = "换弹通知声音"))
+	TMap<FName, TObjectPtr<USoundBase>> ReloadNotifySounds;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reload",
+		meta = (DisplayName = "逐颗装填通知名"))
+	FName ReloadRoundCommitNotifyName = NAME_None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire",
 		meta = (DisplayName = "枪身最后一发开火蒙太奇"))
