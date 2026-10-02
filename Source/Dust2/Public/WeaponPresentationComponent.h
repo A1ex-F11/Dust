@@ -4,6 +4,8 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "WeaponPresentationTypes.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimNotifies/AnimNotify.h"
 #include "WeaponPresentationComponent.generated.h"
 
 class AWeaponRuntime;
@@ -13,6 +15,10 @@ class USceneComponent;
 class UAudioComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FWeaponPresentationSignal);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FReloadWeaponPresentationEvent,
+	AWeaponRuntime*, FormalWeapon,
+	int32, ReloadRequestId);
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
 class DUST2_API UWeaponPresentationComponent : public UActorComponent
 {
@@ -96,7 +102,19 @@ UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
 	FWeaponPresentationSignal OnRecoilPresentationRequested;
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
 	FWeaponPresentationSignal OnFireEffectsPresentationRequested;
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
+		meta = (ReturnDisplayName = "Started"))
+	bool StartReloadWeaponPresentation(
+		AWeaponRuntime* FormalWeapon,
+		USkeletalMeshComponent* WeaponMesh,
+		UAnimMontage* Montage);
 
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+    void CancelReloadWeaponPresentation(bool bStopMontage = true);
+UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+	FReloadWeaponPresentationEvent OnReloadRoundPresentationCommitted;
+UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+	FReloadWeaponPresentationEvent OnReloadWeaponPresentationCompleted;
 protected:
 
 UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
@@ -117,6 +135,24 @@ UPROPERTY(Transient)
 	TArray<TObjectPtr<UAudioComponent>> ReloadNotifyAudioComponents;
 UPROPERTY(Transient)
 	TWeakObjectPtr<UAudioComponent> ActiveReloadAudioComponent;
+UPROPERTY(Transient)
+	TWeakObjectPtr<AWeaponRuntime> ActiveReloadWeapon;
+UPROPERTY(Transient)
+	TWeakObjectPtr<UAnimInstance> ActiveReloadAnimInstance;
+UPROPERTY(Transient)
+	TWeakObjectPtr<USkeletalMeshComponent> ActiveReloadWeaponMesh;
+
+	int32 ActiveReloadMontageInstanceId = INDEX_NONE;
+	int32 ActiveReloadWeaponRequestId = 0;
+	uint64 ReloadWeaponPlaybackSerial = 0;
+
+	bool IsReloadWeaponPlaybackCurrent() const;
+	void ReleaseReloadWeaponPlayback(bool bStopMontage);
+
+	UFUNCTION()
+	void HandleReloadWeaponNotifyBegin(
+		FName NotifyName,
+		const FBranchingPointNotifyPayload& Payload);
 UFUNCTION()
 	void HandleFireCommitted();
 UFUNCTION()

@@ -1,6 +1,7 @@
 
 #include "WeaponPresentationComponent.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/ChildActorComponent.h"
 #include "Components/AudioComponent.h"
@@ -24,7 +25,7 @@ void UWeaponPresentationComponent::SetWeaponForPresentation(
 	{
 		return;
 	}
-	StopReloadPresentationSounds();
+	CancelReloadWeaponPresentation();
 	if (AWeaponRuntime* OldWeapon = BoundWeapon.Get())
 	{
 		OldWeapon->OnFireCommitted.RemoveDynamic(
@@ -56,13 +57,13 @@ void UWeaponPresentationComponent::HandleFireCommitted()
 
 void UWeaponPresentationComponent::HandleReloadStarted()
 {
-	StopReloadPresentationSounds();
+	CancelReloadWeaponPresentation();
 	OnReloadPresentationRequested.Broadcast();
 }
 void UWeaponPresentationComponent::EndPlay(
 	const EEndPlayReason::Type EndPlayReason)
 {
-	StopReloadPresentationSounds();
+	CancelReloadWeaponPresentation();
 	SetWeaponForPresentation(nullptr);
 	BoundWeapon.Reset();
 	Super::EndPlay(EndPlayReason);
@@ -439,4 +440,171 @@ void UWeaponPresentationComponent::StopReloadPresentationSounds()
 		}
 	}
 	ReloadNotifyAudioComponents.Reset();
+}
+bool UWeaponPresentationComponent::IsReloadWeaponPlaybackCurrent() const
+{
+	return ActiveReloadMontageInstanceId != INDEX_NONE &&
+		ActiveReloadAnimInstance.IsValid() &&
+		ActiveReloadWeaponMesh.IsValid() &&
+		ShouldCompleteReloadPresentation(
+			true,
+			ActiveReloadWeapon.Get(),
+			BoundWeapon.Get(),
+			ActiveReloadWeaponRequestId);
+}
+
+bool UWeaponPresentationComponent::StartReloadWeaponPresentation(
+	AWeaponRuntime* FormalWeapon,
+	USkeletalMeshComponent* WeaponMesh,
+	UAnimMontage* Montage)
+{
+	if (!IsValid(FormalWeapon) ||
+		FormalWeapon != BoundWeapon.Get() ||
+		!FormalWeapon->IsReloading() ||
+		FormalWeapon->GetReloadRequestId() <= 0 ||
+		!IsValid(WeaponMesh) || !IsValid(Montage))
+	{
+		return false;
+	}
+
+	UAnimInstance* AnimInstance = WeaponMesh->GetAnimInstance();
+	if (!IsValid(AnimInstance))
+	{
+		return false;
+	}
+
+	const int32 PlaybackRequestId = FormalWeapon->GetReloadRequestId();
+	CancelReloadWeaponPresentation();
+
+	const float PlayedLength = AnimInstance->Montage_Play(
+		Montage, 1.0f,
+		EMontagePlayReturnType::MontageLength, 0.0f, true);
+	if (PlayedLength <= 0.0f)
+	{
+		return false;
+	}
+
+	FAnimMontageInstance* Instance =
+		AnimInstance->GetActiveInstanceForMontage(Montage);
+	if (!Instance)
+	{
+		return false;
+	}
+	if (Instance->OnMontageEnded.IsBound() ||
+		!ShouldCompleteReloadPresentation(
+			true, FormalWeapon, BoundWeapon.Get(), PlaybackRequestId))
+	{
+		Instance->Stop(FAlphaBlend(0.1f), true);
+		return false;
+	}
+
+	ActiveReloadWeapon = FormalWeapon;
+	ActiveReloadAnimInstance = AnimInstance;
+	ActiveReloadWeaponMesh = WeaponMesh;
+	ActiveReloadMontageInstanceId = Instance->GetInstanceID();
+	ActiveReloadWeaponRequestId = PlaybackRequestId;
+
+	const uint64 PlaybackSerial = ++ReloadWeaponPlaybackSerial;
+	const int32 PlaybackInstanceId = ActiveReloadMontageInstanceId;
+	const TWeakObjectPtr<AWeaponRuntime> PlaybackWeapon(FormalWeapon);
+
+	FOnMontageEnded EndDelegate;
+	EndDelegate.BindWeakLambda(this,
+		[this, PlaybackSerial, PlaybackInstanceId,
+		PlaybackWeapon, PlaybackRequestId]
+		(UAnimMontage*, bool bInterrupted)
+		{
+			if (ReloadWeaponPlaybackSerial != PlaybackSerial ||
+				ActiveReloadMontageInstanceId != PlaybackInstanceId ||
+				ActiveReloadWeapon != PlaybackWeapon ||
+				ActiveReloadWeaponRequestId != PlaybackRequestId)
+			{
+				return;
+			}
+
+			const bool bCanComplete =
+				!bInterrupted && IsReloadWeaponPlaybackCurrent();
+			AWeaponRuntime* CompletedWeapon = PlaybackWeapon.Get();
+			ReleaseReloadWeaponPlayback(false);
+
+			if (!bCanComplete)
+			{
+				StopReloadPresentationSounds();
+				return;
+			}
+
+			OnReloadWeaponPresentationCompleted.Broadcast(
+				CompletedWeapon, PlaybackRequestId);
+		});
+
+	Instance->OnMontageEnded = EndDelegate;
+	AnimInstance->OnPlayMontageNotifyBegin.AddUniqueDynamic(
+		this, &UWeaponPresentationComponent::HandleReloadWeaponNotifyBegin);
+	return true;
+}
+
+void UWeaponPresentationComponent::HandleReloadWeaponNotifyBegin(
+	FName NotifyName,
+	const FBranchingPointNotifyPayload& Payload)
+{
+	if (Payload.MontageInstanceID != ActiveReloadMontageInstanceId ||
+		!IsReloadWeaponPlaybackCurrent())
+	{
+		return;
+	}
+
+	AWeaponRuntime* ReloadingWeapon = ActiveReloadWeapon.Get();
+	const int32 RequestId = ActiveReloadWeaponRequestId;
+
+	const bool bRoundCommitted = HandleReloadPresentationNotify(
+		NotifyName,
+		ActiveReloadWeaponMesh.Get(),
+		true,
+		ReloadingWeapon,
+		BoundWeapon.Get(),
+		RequestId);
+
+	if (bRoundCommitted)
+	{
+		OnReloadRoundPresentationCommitted.Broadcast(
+			ReloadingWeapon, RequestId);
+	}
+}
+
+void UWeaponPresentationComponent::ReleaseReloadWeaponPlayback(
+	bool bStopMontage)
+{
+	UAnimInstance* AnimInstance = ActiveReloadAnimInstance.Get();
+	const int32 SavedInstanceId = ActiveReloadMontageInstanceId;
+
+	// ��ʹ����ί���Ѹ��ƽ����У���serialҲ��ʹ��ʧЧ��
+	++ReloadWeaponPlaybackSerial;
+	ActiveReloadWeapon.Reset();
+	ActiveReloadAnimInstance.Reset();
+	ActiveReloadWeaponMesh.Reset();
+	ActiveReloadMontageInstanceId = INDEX_NONE;
+	ActiveReloadWeaponRequestId = 0;
+
+	if (IsValid(AnimInstance))
+	{
+		AnimInstance->OnPlayMontageNotifyBegin.RemoveDynamic(
+			this,
+			&UWeaponPresentationComponent::HandleReloadWeaponNotifyBegin);
+
+		if (FAnimMontageInstance* Instance =
+			AnimInstance->GetMontageInstanceForID(SavedInstanceId))
+		{
+			Instance->OnMontageEnded.Unbind();
+			if (bStopMontage)
+			{
+				Instance->Stop(FAlphaBlend(0.1f), true);
+			}
+		}
+	}
+}
+
+void UWeaponPresentationComponent::CancelReloadWeaponPresentation(bool bStopMontage)
+{
+	ReleaseReloadWeaponPlayback(bStopMontage);
+	StopReloadPresentationSounds();
 }
