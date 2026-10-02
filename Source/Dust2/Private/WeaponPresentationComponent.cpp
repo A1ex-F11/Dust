@@ -24,11 +24,6 @@ void UWeaponPresentationComponent::SetWeaponForPresentation(
 	{
 		return;
 	}
-	if (BoundWeapon.Get() == NewWeapon)
-	{
-		return;
-	}
-
 	StopReloadPresentationSounds();
 	if (AWeaponRuntime* OldWeapon = BoundWeapon.Get())
 	{
