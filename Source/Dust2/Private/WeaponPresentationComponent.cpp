@@ -3,6 +3,7 @@
 #include "Animation/AnimInstance.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/ChildActorComponent.h"
+#include "Components/AudioComponent.h"
 #include "WeaponRuntime.h"
 
 UWeaponPresentationComponent::UWeaponPresentationComponent()
@@ -279,4 +280,21 @@ bool UWeaponPresentationComponent::ResolveVariantReloadPresentation(
 	OutReloadRequestId = FormalWeapon->GetReloadRequestId();
 
 	return true;
+}
+void UWeaponPresentationComponent::PlayReloadPresentationAudio(
+	UAudioComponent* AudioComponent,
+	USoundBase* Sound)
+{
+	if (!IsValid(AudioComponent))
+	{
+		return;
+	}
+
+	AudioComponent->Stop();
+	AudioComponent->SetSound(Sound);
+
+	if (IsValid(Sound))
+	{
+		AudioComponent->Play(0.0f);
+	}
 }

@@ -9,6 +9,7 @@
 class AWeaponRuntime;
 class UChildActorComponent;
 class USkeletalMeshComponent;
+class UAudioComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FWeaponPresentationSignal);
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
@@ -19,35 +20,10 @@ public:
 	UWeaponPresentationComponent();
 UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
 	void SetWeaponForPresentation(AWeaponRuntime* NewWeapon);
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
-	FWeaponPresentationSignal OnFirePresentationRequested;
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
-	FWeaponPresentationSignal OnReloadPresentationRequested;
-UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
-		meta = (ReturnDisplayName = "Found"))
-	bool FindWeaponPresentationProfile(
-		AWeaponRuntime* FormalWeapon,
-		FWeaponPresentationProfile& OutProfile) const;
-UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
-		meta = (ReturnDisplayName = "Found"))
-	bool ResolveStandardReloadPresentation(
-		AWeaponRuntime* FormalWeapon,
-		UAnimMontage* CharacterReloadTactical,
-		UAnimMontage* CharacterReloadEmpty,
-		FWeaponReloadVariant& OutPresentation) const;
-	UFUNCTION(BlueprintCallable, BlueprintPure = false,
-		Category = "Weapon Presentation",
-		meta = (ReturnDisplayName = "Found"))
-	bool ResolveVariantReloadPresentation(
-		AWeaponRuntime* FormalWeapon,
-		int32 MagazineCapacity,
-		FWeaponReloadVariant& OutPresentation,
-		int32& OutPlannedReloadCount,
-		int32& OutReloadRequestId) const;
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
-	FWeaponPresentationSignal OnRecoilPresentationRequested;
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
-	FWeaponPresentationSignal OnFireEffectsPresentationRequested;
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+	void PlayReloadPresentationAudio(
+		UAudioComponent* AudioComponent,
+		USoundBase* Sound);
 UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
 	UAnimMontage* ResolveWeaponFireMontage(
 		AWeaponRuntime* FormalWeapon,
@@ -67,8 +43,39 @@ UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
 	void PlayPresentationMontage(
 		USkeletalMeshComponent* Mesh,
 		UAnimMontage* Montage);
+UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
+		meta = (ReturnDisplayName = "Found"))
+	bool FindWeaponPresentationProfile(
+		AWeaponRuntime* FormalWeapon,
+		FWeaponPresentationProfile& OutProfile) const;
+UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
+		meta = (ReturnDisplayName = "Found"))
+	bool ResolveStandardReloadPresentation(
+		AWeaponRuntime* FormalWeapon,
+		UAnimMontage* CharacterReloadTactical,
+		UAnimMontage* CharacterReloadEmpty,
+		FWeaponReloadVariant& OutPresentation) const;
+UFUNCTION(BlueprintCallable, BlueprintPure = false,
+		Category = "Weapon Presentation",
+		meta = (ReturnDisplayName = "Found"))
+	bool ResolveVariantReloadPresentation(
+		AWeaponRuntime* FormalWeapon,
+		int32 MagazineCapacity,
+		FWeaponReloadVariant& OutPresentation,
+		int32& OutPlannedReloadCount,
+		int32& OutReloadRequestId) const;
+UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+	FWeaponPresentationSignal OnFirePresentationRequested;
+UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+	FWeaponPresentationSignal OnReloadPresentationRequested;
+UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+	FWeaponPresentationSignal OnRecoilPresentationRequested;
+UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+	FWeaponPresentationSignal OnFireEffectsPresentationRequested;
+
 protected:
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+
+UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
 		Category = "Weapon Presentation|Configuration",
 		meta = (DisplayName = "视觉武器基类"))
 	TSubclassOf<AActor> VisualWeaponBaseClass;
