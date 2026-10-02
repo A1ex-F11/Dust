@@ -23,7 +23,7 @@ UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
 class DUST2_API UWeaponPresentationComponent : public UActorComponent
 {
 	GENERATED_BODY()
-public:	
+public:
 	UWeaponPresentationComponent();
 UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
 	void SetWeaponForPresentation(AWeaponRuntime* NewWeapon);

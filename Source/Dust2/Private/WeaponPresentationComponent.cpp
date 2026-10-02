@@ -10,7 +10,7 @@
 
 UWeaponPresentationComponent::UWeaponPresentationComponent()
 {
-	
+
 	PrimaryComponentTick.bCanEverTick = false;
 }
 void UWeaponPresentationComponent::SetWeaponForPresentation(
