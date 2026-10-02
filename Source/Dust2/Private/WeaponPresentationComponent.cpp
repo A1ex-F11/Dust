@@ -206,3 +206,38 @@ void UWeaponPresentationComponent::PlayFirePresentation(
 		WeaponMesh,
 		WeaponFireMontage);
 }
+bool UWeaponPresentationComponent::ResolveStandardReloadPresentation(
+	AWeaponRuntime* FormalWeapon,
+	UAnimMontage* CharacterReloadTactical,
+	UAnimMontage* CharacterReloadEmpty,
+	FWeaponReloadVariant& OutPresentation) const
+{
+	OutPresentation = FWeaponReloadVariant{};
+
+	FWeaponPresentationProfile Profile;
+	if (!FindWeaponPresentationProfile(FormalWeapon, Profile))
+	{
+		return false;
+	}
+
+	if (Profile.ReloadVariants.Num() > 0)
+	{
+		return false;
+	}
+
+	const bool bIsEmpty = FormalWeapon->GetCurrentAmmo() == 0;
+
+	OutPresentation.CharacterMontage = bIsEmpty
+		? CharacterReloadEmpty
+		: CharacterReloadTactical;
+
+	OutPresentation.WeaponMontage = bIsEmpty
+		? Profile.ReloadEmptyMontage
+		: Profile.ReloadTacticalMontage;
+
+	OutPresentation.ReloadSound = bIsEmpty
+		? Profile.ReloadEmptySound
+		: Profile.ReloadTacticalSound;
+
+	return true;
+}

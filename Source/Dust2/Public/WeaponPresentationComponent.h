@@ -28,9 +28,15 @@ UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
 	bool FindWeaponPresentationProfile(
 		AWeaponRuntime* FormalWeapon,
 		FWeaponPresentationProfile& OutProfile) const;
+UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
+		meta = (ReturnDisplayName = "Found"))
+	bool ResolveStandardReloadPresentation(
+		AWeaponRuntime* FormalWeapon,
+		UAnimMontage* CharacterReloadTactical,
+		UAnimMontage* CharacterReloadEmpty,
+		FWeaponReloadVariant& OutPresentation) const;
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
 	FWeaponPresentationSignal OnRecoilPresentationRequested;
-
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
 	FWeaponPresentationSignal OnFireEffectsPresentationRequested;
 UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
