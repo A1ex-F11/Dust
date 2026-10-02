@@ -99,6 +99,10 @@ UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
 		int32 ExpectedReloadRequestId);
 UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
 	void StopReloadPresentationSounds();
+UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
+	bool HasConsumedInitialDraw(AWeaponRuntime* FormalWeapon) const;
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+	void MarkInitialDrawConsumed(AWeaponRuntime* FormalWeapon);
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
 	FWeaponPresentationSignal OnFirePresentationRequested;
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
@@ -136,6 +140,8 @@ private:
 
 UPROPERTY(Transient)
 	TWeakObjectPtr<AWeaponRuntime> BoundWeapon;
+UPROPERTY(Transient)
+	TSet<TWeakObjectPtr<AWeaponRuntime>> InitialDrawConsumedWeapons;
 UPROPERTY(Transient)
 	TArray<TObjectPtr<UAudioComponent>> ReloadNotifyAudioComponents;
 UPROPERTY(Transient)

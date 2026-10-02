@@ -615,3 +615,30 @@ bool UWeaponPresentationComponent::ShouldUseFastDrawPresentation(
 	return !IsValid(PresentationProfile.DrawCharacterMontage.Get())
 		|| (bInitialDrawConsumed && !PresentationProfile.bAlwaysUseFullDraw);
 }
+bool UWeaponPresentationComponent::HasConsumedInitialDraw(
+	AWeaponRuntime* FormalWeapon) const
+{
+	return IsValid(FormalWeapon)
+		&& InitialDrawConsumedWeapons.Contains(
+			TWeakObjectPtr<AWeaponRuntime>(FormalWeapon));
+}
+
+void UWeaponPresentationComponent::MarkInitialDrawConsumed(
+	AWeaponRuntime* FormalWeapon)
+{
+	if (!IsValid(FormalWeapon))
+	{
+		return;
+	}
+
+	for (auto It = InitialDrawConsumedWeapons.CreateIterator(); It; ++It)
+	{
+		if (!(*It).IsValid())
+		{
+			It.RemoveCurrent();
+		}
+	}
+
+	InitialDrawConsumedWeapons.Add(
+		TWeakObjectPtr<AWeaponRuntime>(FormalWeapon));
+}
