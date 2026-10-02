@@ -35,6 +35,15 @@ UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
 		UAnimMontage* CharacterReloadTactical,
 		UAnimMontage* CharacterReloadEmpty,
 		FWeaponReloadVariant& OutPresentation) const;
+	UFUNCTION(BlueprintCallable, BlueprintPure = false,
+		Category = "Weapon Presentation",
+		meta = (ReturnDisplayName = "Found"))
+	bool ResolveVariantReloadPresentation(
+		AWeaponRuntime* FormalWeapon,
+		int32 MagazineCapacity,
+		FWeaponReloadVariant& OutPresentation,
+		int32& OutPlannedReloadCount,
+		int32& OutReloadRequestId) const;
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
 	FWeaponPresentationSignal OnRecoilPresentationRequested;
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")

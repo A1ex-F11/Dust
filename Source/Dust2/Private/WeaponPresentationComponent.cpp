@@ -241,3 +241,42 @@ bool UWeaponPresentationComponent::ResolveStandardReloadPresentation(
 
 	return true;
 }
+bool UWeaponPresentationComponent::ResolveVariantReloadPresentation(
+	AWeaponRuntime* FormalWeapon,
+	int32 MagazineCapacity,
+	FWeaponReloadVariant& OutPresentation,
+	int32& OutPlannedReloadCount,
+	int32& OutReloadRequestId) const
+{
+	OutPresentation = FWeaponReloadVariant{};
+	OutPlannedReloadCount = 0;
+	OutReloadRequestId = 0;
+
+	FWeaponPresentationProfile Profile;
+	if (!FindWeaponPresentationProfile(FormalWeapon, Profile))
+	{
+		return false;
+	}
+
+	const int32 MissingAmmo = FMath::Max(
+		0, MagazineCapacity - FormalWeapon->GetCurrentAmmo());
+
+	const int32 AvailableAmmo = FMath::Max(
+		0, FormalWeapon->GetReserveAmmo());
+
+	const int32 PlannedReloadCount = FMath::Min(
+		MissingAmmo, AvailableAmmo);
+
+	const int32 VariantIndex = PlannedReloadCount - 1;
+
+	if (!Profile.ReloadVariants.IsValidIndex(VariantIndex))
+	{
+		return false;
+	}
+
+	OutPresentation = Profile.ReloadVariants[VariantIndex];
+	OutPlannedReloadCount = PlannedReloadCount;
+	OutReloadRequestId = FormalWeapon->GetReloadRequestId();
+
+	return true;
+}
