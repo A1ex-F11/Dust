@@ -70,6 +70,12 @@ UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
 		AWeaponRuntime* ReloadingWeapon,
 		AWeaponRuntime* CurrentWeapon,
 		int32 ExpectedReloadRequestId) const;
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+	bool TryCommitReloadPresentationRound(
+		bool bCompletionAllowed,
+		AWeaponRuntime* ReloadingWeapon,
+		AWeaponRuntime* CurrentWeapon,
+		int32 ExpectedReloadRequestId);
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
 	FWeaponPresentationSignal OnFirePresentationRequested;
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")

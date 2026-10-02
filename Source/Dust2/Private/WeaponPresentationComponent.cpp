@@ -321,3 +321,21 @@ bool UWeaponPresentationComponent::ShouldCompleteReloadPresentation(
 		ReloadingWeapon->GetReloadRequestId() ==
 		ExpectedReloadRequestId;
 }
+bool UWeaponPresentationComponent::TryCommitReloadPresentationRound(
+	bool bCompletionAllowed,
+	AWeaponRuntime* ReloadingWeapon,
+	AWeaponRuntime* CurrentWeapon,
+	int32 ExpectedReloadRequestId)
+{
+	if (!ShouldCompleteReloadPresentation(
+		bCompletionAllowed,
+		ReloadingWeapon,
+		CurrentWeapon,
+		ExpectedReloadRequestId))
+	{
+		return false;
+	}
+
+	return ReloadingWeapon->TryCommitReloadRound(
+		ExpectedReloadRequestId);
+}
