@@ -608,3 +608,10 @@ void UWeaponPresentationComponent::CancelReloadWeaponPresentation(bool bStopMont
 	ReleaseReloadWeaponPlayback(bStopMontage);
 	StopReloadPresentationSounds();
 }
+bool UWeaponPresentationComponent::ShouldUseFastDrawPresentation(
+	const FWeaponPresentationProfile& PresentationProfile,
+	bool bInitialDrawConsumed) const
+{
+	return !IsValid(PresentationProfile.DrawCharacterMontage.Get())
+		|| (bInitialDrawConsumed && !PresentationProfile.bAlwaysUseFullDraw);
+}

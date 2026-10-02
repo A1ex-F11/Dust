@@ -51,6 +51,11 @@ UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
 		USkeletalMeshComponent* Mesh,
 		UAnimMontage* Montage);
 UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
+		meta = (ReturnDisplayName = "Use Fast Draw"))
+	bool ShouldUseFastDrawPresentation(
+		const FWeaponPresentationProfile& PresentationProfile,
+		bool bInitialDrawConsumed) const;
+UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
 		meta = (ReturnDisplayName = "Found"))
 	bool FindWeaponPresentationProfile(
 		AWeaponRuntime* FormalWeapon,
