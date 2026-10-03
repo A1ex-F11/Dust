@@ -53,6 +53,12 @@ UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
 	void PlayPresentationMontage(
 		USkeletalMeshComponent* Mesh,
 		UAnimMontage* Montage);
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
+		meta = (ReturnDisplayName = "Played"))
+	bool TryPlayPresentationMontage(
+		USkeletalMeshComponent* Mesh,
+		UAnimMontage* Montage,
+		float StartTime = 0.0f);
 UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
 		meta = (ReturnDisplayName = "Use Fast Draw"))
 	bool ShouldUseFastDrawPresentation(

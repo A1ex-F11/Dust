@@ -189,6 +189,38 @@ void UWeaponPresentationComponent::PlayPresentationMontage(
 		0.0f,
 		true);
 }
+bool UWeaponPresentationComponent::TryPlayPresentationMontage(
+	USkeletalMeshComponent* Mesh,
+	UAnimMontage* Montage,
+	float StartTime)
+{
+	if (!IsValid(Mesh) || !IsValid(Montage)
+		|| !FMath::IsFinite(StartTime))
+	{
+		return false;
+	}
+
+	const float Length = Montage->GetPlayLength();
+	if (!FMath::IsFinite(Length) || Length <= 0.0f
+		|| StartTime < 0.0f || StartTime >= Length)
+	{
+		return false;
+	}
+
+	UAnimInstance* AnimInstance = Mesh->GetAnimInstance();
+	if (!IsValid(AnimInstance))
+	{
+		return false;
+	}
+
+	const float PlayedLength = AnimInstance->Montage_Play(
+		Montage,
+		1.0f,
+		EMontagePlayReturnType::MontageLength,
+		StartTime,
+		true);
+	return FMath::IsFinite(PlayedLength) && PlayedLength > 0.0f;
+}
 void UWeaponPresentationComponent::PlayFirePresentation(
 	AWeaponRuntime* FormalWeapon,
 	USkeletalMeshComponent* CharacterMesh,
