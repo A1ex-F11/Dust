@@ -6,6 +6,7 @@
 #include "WeaponPresentationTypes.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimNotifies/AnimNotify.h"
+#include "TimerManager.h"
 #include "WeaponPresentationComponent.generated.h"
 
 class AWeaponRuntime;
@@ -19,6 +20,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	FReloadWeaponPresentationEvent,
 	AWeaponRuntime*, FormalWeapon,
 	int32, ReloadRequestId);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FDrawPresentationFinishedEvent, bool, CompletedNormally);
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
 class DUST2_API UWeaponPresentationComponent : public UActorComponent
 {
@@ -103,6 +106,30 @@ UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
 	bool HasConsumedInitialDraw(AWeaponRuntime* FormalWeapon) const;
 UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
 	void MarkInitialDrawConsumed(AWeaponRuntime* FormalWeapon);
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
+		meta = (ReturnDisplayName = "Started"))
+	bool BeginFastDrawTransition(AWeaponRuntime* FormalWeapon, float Delay);
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+	void CancelFastDrawTransition();
+UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
+	bool IsFastDrawTransitionPending() const;
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+	void PrepareDrawPresentationWatch();
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+	void InterruptDrawPresentationWatch();
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
+		meta = (ReturnDisplayName = "Watching"))
+	bool WatchDrawPresentationCompletion(
+		AWeaponRuntime* FormalWeapon,
+		USkeletalMeshComponent* CharacterMesh,
+		UAnimMontage* CharacterMontage,
+		USkeletalMeshComponent* WeaponMesh,
+		UAnimMontage* WeaponMontage,
+		bool bFinalStage);
+UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+	FDrawPresentationFinishedEvent OnDrawPresentationFinished;
+UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+	FWeaponPresentationSignal OnFastDrawTransitionRequested;
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
 	FWeaponPresentationSignal OnFirePresentationRequested;
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
@@ -136,6 +163,10 @@ UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
 
 	virtual void EndPlay(
 		const EEndPlayReason::Type EndPlayReason) override;
+UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "Weapon Presentation|Configuration",
+		meta = (ClampMin = "0.0", DisplayName = "拔枪切换提前放行秒数"))
+	float DrawSwitchReleaseLeadTime = 0.3f;
 private:
 
 UPROPERTY(Transient)
@@ -168,4 +199,30 @@ UFUNCTION()
 	void HandleFireCommitted();
 UFUNCTION()
 	void HandleReloadStarted();
+FTimerHandle FastDrawTransitionTimer;
+UPROPERTY(Transient)
+	TWeakObjectPtr<AWeaponRuntime> FastDrawTransitionWeapon;
+	bool bFastDrawTransitionPending = false;
+	uint64 FastDrawTransitionSerial = 0;
+	void HandleFastDrawTransitionTimer();
+TWeakObjectPtr<AWeaponRuntime> WatchedDrawWeapon;
+TWeakObjectPtr<UAnimInstance> DrawWatchAnimInstances[2];
+	int32 DrawWatchInstanceIds[2] = { INDEX_NONE, INDEX_NONE };
+FOnMontageEnded DrawWatchPreviousEndDelegates[2];
+FTimerHandle DrawSwitchReleaseTimer;
+float ActiveDrawSwitchLeadTime = 0.0f;
+bool TryGetDrawRemainingTime(float& OutSeconds) const;
+void StartEarlyDrawSwitchRelease();
+void ArmEarlyDrawSwitchRelease(float Delay);
+void HandleEarlyDrawSwitchRelease(uint64 Serial);
+void ClearEarlyDrawSwitchRelease();
+	bool bDrawWatchLayerPending[2] = { false, false };
+	uint64 DrawWatchSerial = 0;
+	bool bDrawWatchFinalStage = false;
+	bool bDrawWatchFailed = false;
+	bool WatchDrawLayer(int32 Layer, USkeletalMeshComponent* Mesh,
+		UAnimMontage* Montage);
+	void HandleDrawLayerEnded(uint64 Serial, int32 Layer,
+		int32 InstanceId, bool bInterrupted);
+	void TryFinishDrawPresentationWatch();
 };

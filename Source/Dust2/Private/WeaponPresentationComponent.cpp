@@ -6,6 +6,7 @@
 #include "Components/ChildActorComponent.h"
 #include "Components/AudioComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/World.h"
 #include "WeaponRuntime.h"
 
 UWeaponPresentationComponent::UWeaponPresentationComponent()
@@ -25,6 +26,8 @@ void UWeaponPresentationComponent::SetWeaponForPresentation(
 	{
 		return;
 	}
+	PrepareDrawPresentationWatch();
+	CancelFastDrawTransition();
 	CancelReloadWeaponPresentation();
 	if (AWeaponRuntime* OldWeapon = BoundWeapon.Get())
 	{
@@ -57,12 +60,16 @@ void UWeaponPresentationComponent::HandleFireCommitted()
 
 void UWeaponPresentationComponent::HandleReloadStarted()
 {
+	CancelFastDrawTransition();
+	InterruptDrawPresentationWatch();
 	CancelReloadWeaponPresentation();
 	OnReloadPresentationRequested.Broadcast();
 }
 void UWeaponPresentationComponent::EndPlay(
 	const EEndPlayReason::Type EndPlayReason)
 {
+	PrepareDrawPresentationWatch();
+	CancelFastDrawTransition();
 	CancelReloadWeaponPresentation();
 	SetWeaponForPresentation(nullptr);
 	BoundWeapon.Reset();
@@ -641,4 +648,331 @@ void UWeaponPresentationComponent::MarkInitialDrawConsumed(
 
 	InitialDrawConsumedWeapons.Add(
 		TWeakObjectPtr<AWeaponRuntime>(FormalWeapon));
+}
+bool UWeaponPresentationComponent::BeginFastDrawTransition(
+	AWeaponRuntime* FormalWeapon, float Delay)
+{
+	CancelFastDrawTransition();
+	UWorld* World = GetWorld();
+	if (!World || !IsValid(FormalWeapon)
+		|| BoundWeapon.Get() != FormalWeapon)
+	{
+		return false;
+	}
+
+	FastDrawTransitionWeapon = FormalWeapon;
+	bFastDrawTransitionPending = true;
+	if (Delay > 0.0f)
+	{
+		World->GetTimerManager().SetTimer(
+			FastDrawTransitionTimer, this,
+			&UWeaponPresentationComponent::HandleFastDrawTransitionTimer,
+			Delay, false);
+	}
+	else
+	{
+		FastDrawTransitionTimer = World->GetTimerManager().SetTimerForNextTick(
+			FTimerDelegate::CreateUObject(
+				this,
+				&UWeaponPresentationComponent::HandleFastDrawTransitionTimer));
+	}
+	return true;
+}
+
+void UWeaponPresentationComponent::CancelFastDrawTransition()
+{
+	++FastDrawTransitionSerial;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(FastDrawTransitionTimer);
+	}
+	FastDrawTransitionTimer.Invalidate();
+	bFastDrawTransitionPending = false;
+	FastDrawTransitionWeapon.Reset();
+}
+
+bool UWeaponPresentationComponent::IsFastDrawTransitionPending() const
+{
+	return bFastDrawTransitionPending;
+}
+
+void UWeaponPresentationComponent::HandleFastDrawTransitionTimer()
+{
+	AWeaponRuntime* Weapon = FastDrawTransitionWeapon.Get();
+	if (!bFastDrawTransitionPending || !IsValid(Weapon)
+		|| BoundWeapon.Get() != Weapon)
+	{
+		CancelFastDrawTransition();
+		return;
+	}
+
+	const uint64 CallbackSerial = FastDrawTransitionSerial;
+	OnFastDrawTransitionRequested.Broadcast();
+	if (FastDrawTransitionSerial == CallbackSerial
+		&& bFastDrawTransitionPending)
+	{
+		CancelFastDrawTransition();
+	}
+}
+void UWeaponPresentationComponent::PrepareDrawPresentationWatch()
+{
+	ClearEarlyDrawSwitchRelease();
+	++DrawWatchSerial;
+	for (int32 Layer = 0; Layer < 2; ++Layer)
+	{
+		if (UAnimInstance* Anim = DrawWatchAnimInstances[Layer].Get())
+		{
+			if (FAnimMontageInstance* Instance =
+				Anim->GetMontageInstanceForID(DrawWatchInstanceIds[Layer]))
+			{
+				if (Instance->OnMontageEnded.IsBoundToObject(this))
+				{
+					Instance->OnMontageEnded =
+						DrawWatchPreviousEndDelegates[Layer];
+				}
+			}
+		}
+		DrawWatchAnimInstances[Layer].Reset();
+		DrawWatchInstanceIds[Layer] = INDEX_NONE;
+		DrawWatchPreviousEndDelegates[Layer].Unbind();
+		bDrawWatchLayerPending[Layer] = false;
+	}
+	WatchedDrawWeapon.Reset();
+	bDrawWatchFinalStage = false;
+	bDrawWatchFailed = false;
+}
+
+bool UWeaponPresentationComponent::WatchDrawLayer(
+	int32 Layer, USkeletalMeshComponent* Mesh, UAnimMontage* Montage)
+{
+	if (!IsValid(Mesh) || !IsValid(Montage))
+	{
+		if (Mesh != nullptr || Montage != nullptr)
+		{
+			bDrawWatchFailed = true;
+		}
+		return false;
+	}
+	UAnimInstance* Anim = Mesh->GetAnimInstance();
+	if (!IsValid(Anim))
+	{
+		bDrawWatchFailed = true;
+		return false;
+	}
+	FAnimMontageInstance* Instance = Anim->GetActiveInstanceForMontage(Montage);
+	if (!Instance)
+	{
+		bDrawWatchFailed = true;
+		return false;
+	}
+
+	if (Layer == 1 && bDrawWatchLayerPending[0]
+		&& DrawWatchAnimInstances[0].Get() == Anim
+		&& DrawWatchInstanceIds[0] == Instance->GetInstanceID())
+	{
+		return true;
+	}
+
+	DrawWatchAnimInstances[Layer] = Anim;
+	DrawWatchInstanceIds[Layer] = Instance->GetInstanceID();
+	bDrawWatchLayerPending[Layer] = true;
+	DrawWatchPreviousEndDelegates[Layer] = Instance->OnMontageEnded;
+	const FOnMontageEnded Previous = DrawWatchPreviousEndDelegates[Layer];
+	const uint64 Serial = DrawWatchSerial;
+	const int32 InstanceId = DrawWatchInstanceIds[Layer];
+	FOnMontageEnded EndDelegate;
+	EndDelegate.BindWeakLambda(this,
+		[this, Previous, Serial, Layer, InstanceId]
+		(UAnimMontage* EndedMontage, bool bInterrupted)
+		{
+			Previous.ExecuteIfBound(EndedMontage, bInterrupted);
+			HandleDrawLayerEnded(Serial, Layer, InstanceId, bInterrupted);
+		});
+	Instance->OnMontageEnded = EndDelegate;
+	return true;
+}
+
+bool UWeaponPresentationComponent::WatchDrawPresentationCompletion(
+	AWeaponRuntime* FormalWeapon,
+	USkeletalMeshComponent* CharacterMesh,
+	UAnimMontage* CharacterMontage,
+	USkeletalMeshComponent* WeaponMesh,
+	UAnimMontage* WeaponMontage,
+	bool bFinalStage)
+{
+	PrepareDrawPresentationWatch();
+	WatchedDrawWeapon = FormalWeapon;
+	bDrawWatchFinalStage = bFinalStage;
+	if (!IsValid(FormalWeapon) || BoundWeapon.Get() != FormalWeapon)
+	{
+		bDrawWatchFailed = true;
+		TryFinishDrawPresentationWatch();
+		return false;
+	}
+
+	WatchDrawLayer(0, CharacterMesh, CharacterMontage);
+	WatchDrawLayer(1, WeaponMesh, WeaponMontage);
+	const bool bWatching = bDrawWatchLayerPending[0]
+		|| bDrawWatchLayerPending[1];
+	if (!bWatching)
+	{
+		bDrawWatchFailed = true;
+	}
+	if (bWatching && bDrawWatchFinalStage)
+	{
+		StartEarlyDrawSwitchRelease();
+	}
+	TryFinishDrawPresentationWatch();
+	return bWatching;
+}
+
+void UWeaponPresentationComponent::HandleDrawLayerEnded(
+	uint64 Serial, int32 Layer, int32 InstanceId, bool bInterrupted)
+{
+	if (Serial != DrawWatchSerial
+		|| DrawWatchInstanceIds[Layer] != InstanceId
+		|| !bDrawWatchLayerPending[Layer])
+	{
+		return;
+	}
+	bDrawWatchLayerPending[Layer] = false;
+	DrawWatchInstanceIds[Layer] = INDEX_NONE;
+	DrawWatchAnimInstances[Layer].Reset();
+	DrawWatchPreviousEndDelegates[Layer].Unbind();
+	if (bInterrupted)
+	{
+		ClearEarlyDrawSwitchRelease();
+	}
+	bDrawWatchFailed |= bInterrupted;
+	TryFinishDrawPresentationWatch();
+}
+
+void UWeaponPresentationComponent::TryFinishDrawPresentationWatch()
+{
+	if (!bDrawWatchFinalStage
+		|| bDrawWatchLayerPending[0] || bDrawWatchLayerPending[1])
+	{
+		return;
+	}
+	const bool bCompletedNormally = !bDrawWatchFailed
+		&& WatchedDrawWeapon.IsValid()
+		&& WatchedDrawWeapon.Get() == BoundWeapon.Get();
+	PrepareDrawPresentationWatch();
+	OnDrawPresentationFinished.Broadcast(bCompletedNormally);
+}
+void UWeaponPresentationComponent::ClearEarlyDrawSwitchRelease()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(DrawSwitchReleaseTimer);
+	}
+	DrawSwitchReleaseTimer.Invalidate();
+	ActiveDrawSwitchLeadTime = 0.0f;
+}
+
+bool UWeaponPresentationComponent::TryGetDrawRemainingTime(
+	float& OutSeconds) const
+{
+	OutSeconds = 0.0f;
+	if (!bDrawWatchFinalStage || bDrawWatchFailed
+		|| !WatchedDrawWeapon.IsValid()
+		|| WatchedDrawWeapon.Get() != BoundWeapon.Get())
+	{
+		return false;
+	}
+	bool bHasLayer = false;
+	for (int32 Layer = 0; Layer < 2; ++Layer)
+	{
+		if (!bDrawWatchLayerPending[Layer])
+		{
+			continue;
+		}
+		UAnimInstance* Anim = DrawWatchAnimInstances[Layer].Get();
+		FAnimMontageInstance* Instance = Anim
+			? Anim->GetMontageInstanceForID(DrawWatchInstanceIds[Layer])
+			: nullptr;
+		UAnimMontage* Montage = Instance ? Instance->Montage : nullptr;
+		if (!Instance || !IsValid(Montage))
+		{
+			return false;
+		}
+		const float Rate = Instance->GetPlayRate() * Montage->RateScale;
+		if (!FMath::IsFinite(Rate) || Rate <= KINDA_SMALL_NUMBER)
+		{
+			return false;
+		}
+		const float Remaining = FMath::Max(
+			0.0f, Montage->GetPlayLength() - Instance->GetPosition()) / Rate;
+		if (!FMath::IsFinite(Remaining))
+		{
+			return false;
+		}
+		OutSeconds = FMath::Max(OutSeconds, Remaining);
+		bHasLayer = true;
+	}
+	return bHasLayer;
+}
+
+void UWeaponPresentationComponent::ArmEarlyDrawSwitchRelease(float Delay)
+{
+	if (UWorld* World = GetWorld())
+	{
+		const uint64 Serial = DrawWatchSerial;
+		FTimerDelegate TimerDelegate;
+		TimerDelegate.BindWeakLambda(this,
+			[this, Serial]() { HandleEarlyDrawSwitchRelease(Serial); });
+		World->GetTimerManager().SetTimer(
+			DrawSwitchReleaseTimer, TimerDelegate,
+			FMath::Max(0.01f, Delay), false);
+	}
+}
+
+void UWeaponPresentationComponent::StartEarlyDrawSwitchRelease()
+{
+	ClearEarlyDrawSwitchRelease();
+	float Remaining = 0.0f;
+	if (!FMath::IsFinite(DrawSwitchReleaseLeadTime)
+		|| DrawSwitchReleaseLeadTime <= 0.0f
+		|| !TryGetDrawRemainingTime(Remaining)
+		|| Remaining <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+	ActiveDrawSwitchLeadTime = FMath::Min(
+		DrawSwitchReleaseLeadTime, Remaining * 0.5f);
+	ArmEarlyDrawSwitchRelease(Remaining - ActiveDrawSwitchLeadTime);
+}
+
+void UWeaponPresentationComponent::HandleEarlyDrawSwitchRelease(uint64 Serial)
+{
+	if (Serial != DrawWatchSerial)
+	{
+		return;
+	}
+	float Remaining = 0.0f;
+	if (!TryGetDrawRemainingTime(Remaining))
+	{
+		ClearEarlyDrawSwitchRelease();
+		return;
+	}
+	const float Wait = Remaining - ActiveDrawSwitchLeadTime;
+	if (Wait > 0.01f)
+	{
+		ArmEarlyDrawSwitchRelease(Wait);
+		return;
+	}
+	PrepareDrawPresentationWatch();
+	OnDrawPresentationFinished.Broadcast(true);
+}
+void UWeaponPresentationComponent::InterruptDrawPresentationWatch()
+{
+	ClearEarlyDrawSwitchRelease();
+	if (!WatchedDrawWeapon.IsValid()
+		&& !bDrawWatchLayerPending[0] && !bDrawWatchLayerPending[1])
+	{
+		return;
+	}
+	bDrawWatchFinalStage = true;
+	bDrawWatchFailed = true;
+	TryFinishDrawPresentationWatch();
 }
