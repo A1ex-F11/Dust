@@ -26,6 +26,7 @@ void UWeaponPresentationComponent::SetWeaponForPresentation(
 	{
 		return;
 	}
+	CancelPresentationSwitchCommit(false);
 	ReleaseFullHolsterPresentation(true);
 	PrepareDrawPresentationWatch();
 	CancelFastDrawTransition();
@@ -61,6 +62,7 @@ void UWeaponPresentationComponent::HandleFireCommitted()
 
 void UWeaponPresentationComponent::HandleReloadStarted()
 {
+	CancelPresentationSwitchCommit(true);
 	CancelFullHolsterPresentation();
 	CancelFastDrawTransition();
 	InterruptDrawPresentationWatch();
@@ -70,6 +72,7 @@ void UWeaponPresentationComponent::HandleReloadStarted()
 void UWeaponPresentationComponent::EndPlay(
 	const EEndPlayReason::Type EndPlayReason)
 {
+	CancelPresentationSwitchCommit(false);
 	ReleaseFullHolsterPresentation(true);
 	PrepareDrawPresentationWatch();
 	CancelFastDrawTransition();
@@ -1411,4 +1414,113 @@ bool UWeaponPresentationComponent::StartFullHolsterPresentation(
 				Instance->Stop(FAlphaBlend(0.1f), true);
 			}
 		}
+	}
+
+void UWeaponPresentationComponent::PlayFastHolsterPresentation(
+		USkeletalMeshComponent* CharacterMesh,
+		const FWeaponPresentationProfile& Profile)
+	{
+		if (IsValid(Profile.FastHolsterSound.Get()))
+		{
+			UGameplayStatics::PlaySound2D(
+				this,
+				Profile.FastHolsterSound.Get());
+		}
+
+		TryPlayPresentationMontage(
+			CharacterMesh,
+			Profile.FastHolsterCharacterMontage.Get(),
+			Profile.FastHolsterStartTime);
+	}
+
+	bool UWeaponPresentationComponent::BeginPresentationSwitchCommit(
+		AWeaponRuntime* FormalWeapon,
+		float Delay)
+	{
+		if (!IsValid(FormalWeapon)
+			|| !FMath::IsFinite(Delay)
+			|| bPresentationSwitchCommitPending)
+		{
+			return false;
+		}
+
+		UWorld* World = nullptr;
+		if (Delay > 0.0f)
+		{
+			World = GetWorld();
+			if (!World)
+			{
+				return false;
+			}
+		}
+
+		const uint64 RequestSerial = ++PresentationSwitchCommitSerial;
+		ExpectedPresentationSwitchWeapon = FormalWeapon;
+		bPresentationSwitchCommitPending = true;
+
+		if (Delay > 0.0f)
+		{
+			FTimerDelegate TimerDelegate;
+			TimerDelegate.BindWeakLambda(
+				this,
+				[this, RequestSerial]()
+				{
+					HandlePresentationSwitchCommitTimer(RequestSerial);
+				});
+			World->GetTimerManager().SetTimer(
+				PresentationSwitchCommitTimer,
+				TimerDelegate,
+				Delay,
+				false);
+			return true;
+		}
+
+		HandlePresentationSwitchCommitTimer(RequestSerial);
+		return true;
+	}
+
+	void UWeaponPresentationComponent::CancelPresentationSwitchCommit(
+		bool bNotifyCancelled)
+	{
+		const bool bWasPending = bPresentationSwitchCommitPending;
+		AWeaponRuntime* ExpectedWeapon =
+			ExpectedPresentationSwitchWeapon.Get();
+
+		++PresentationSwitchCommitSerial;
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(
+				PresentationSwitchCommitTimer);
+		}
+		PresentationSwitchCommitTimer.Invalidate();
+		ExpectedPresentationSwitchWeapon.Reset();
+		bPresentationSwitchCommitPending = false;
+
+		if (bWasPending && bNotifyCancelled)
+		{
+			OnPresentationSwitchCommitCancelled.Broadcast(ExpectedWeapon);
+		}
+	}
+
+	void UWeaponPresentationComponent::HandlePresentationSwitchCommitTimer(
+		uint64 Serial)
+	{
+		if (Serial != PresentationSwitchCommitSerial
+			|| !bPresentationSwitchCommitPending)
+		{
+			return;
+		}
+
+		AWeaponRuntime* ExpectedWeapon =
+			ExpectedPresentationSwitchWeapon.Get();
+
+		CancelPresentationSwitchCommit(false);
+
+		if (!IsValid(ExpectedWeapon))
+		{
+			OnPresentationSwitchCommitCancelled.Broadcast(nullptr);
+			return;
+		}
+
+		OnPresentationSwitchCommitRequested.Broadcast(ExpectedWeapon);
 	}

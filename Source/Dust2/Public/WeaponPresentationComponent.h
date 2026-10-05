@@ -22,6 +22,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	int32, ReloadRequestId);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FDrawPresentationFinishedEvent, bool, CompletedNormally);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FPresentationSwitchCommitEvent,
+	AWeaponRuntime*, FormalWeapon);
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
 class DUST2_API UWeaponPresentationComponent : public UActorComponent
 {
@@ -64,6 +67,17 @@ UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
 	bool ShouldUseFastDrawPresentation(
 		const FWeaponPresentationProfile& PresentationProfile,
 		bool bInitialDrawConsumed) const;
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+	void PlayFastHolsterPresentation(
+		USkeletalMeshComponent* CharacterMesh,
+		const FWeaponPresentationProfile& Profile);
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
+		meta = (ReturnDisplayName = "Accepted"))
+	bool BeginPresentationSwitchCommit(
+		AWeaponRuntime* FormalWeapon,
+		float Delay);
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+	void CancelPresentationSwitchCommit(bool bNotifyCancelled = true);
 UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
 		meta = (ReturnDisplayName = "Found"))
 	bool FindWeaponPresentationProfile(
@@ -176,6 +190,10 @@ UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
 		Category = "Weapon Presentation|Configuration",
 		meta = (DisplayName = "完整收枪完成通知名"))
 	FName FullHolsterFinishedNotifyName = TEXT("FullHolsterFinished");
+UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+	FPresentationSwitchCommitEvent OnPresentationSwitchCommitRequested;
+UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+	FPresentationSwitchCommitEvent OnPresentationSwitchCommitCancelled;
 protected:
 
 UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
@@ -282,4 +300,9 @@ UFUNCTION()
 	void HandleFullHolsterWeaponNotifyBegin(
 		FName NotifyName,
 		const FBranchingPointNotifyPayload& Payload);
+FTimerHandle PresentationSwitchCommitTimer;
+TWeakObjectPtr<AWeaponRuntime> ExpectedPresentationSwitchWeapon;
+	bool bPresentationSwitchCommitPending = false;
+	uint64 PresentationSwitchCommitSerial = 0;
+	void HandlePresentationSwitchCommitTimer(uint64 Serial);
 };
