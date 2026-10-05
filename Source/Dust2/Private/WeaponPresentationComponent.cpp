@@ -26,6 +26,7 @@ void UWeaponPresentationComponent::SetWeaponForPresentation(
 	{
 		return;
 	}
+	ReleaseFullHolsterPresentation(true);
 	PrepareDrawPresentationWatch();
 	CancelFastDrawTransition();
 	CancelReloadWeaponPresentation();
@@ -60,6 +61,7 @@ void UWeaponPresentationComponent::HandleFireCommitted()
 
 void UWeaponPresentationComponent::HandleReloadStarted()
 {
+	CancelFullHolsterPresentation();
 	CancelFastDrawTransition();
 	InterruptDrawPresentationWatch();
 	CancelReloadWeaponPresentation();
@@ -68,6 +70,7 @@ void UWeaponPresentationComponent::HandleReloadStarted()
 void UWeaponPresentationComponent::EndPlay(
 	const EEndPlayReason::Type EndPlayReason)
 {
+	ReleaseFullHolsterPresentation(true);
 	PrepareDrawPresentationWatch();
 	CancelFastDrawTransition();
 	CancelReloadWeaponPresentation();
@@ -1008,3 +1011,404 @@ void UWeaponPresentationComponent::InterruptDrawPresentationWatch()
 	bDrawWatchFailed = true;
 	TryFinishDrawPresentationWatch();
 }
+
+bool UWeaponPresentationComponent::StartFullHolsterPresentation(
+		AWeaponRuntime * FormalWeapon,
+		USkeletalMeshComponent * CharacterMesh,
+		USkeletalMeshComponent * WeaponMesh,
+		const FWeaponPresentationProfile & Profile)
+	{
+		if (bFullHolsterActive ||
+			!IsValid(FormalWeapon) ||
+			FormalWeapon != BoundWeapon.Get() ||
+			!IsValid(CharacterMesh) ||
+			FullHolsterFinishedNotifyName.IsNone())
+		{
+			return false;
+		}
+
+		UAnimMontage* CharacterMontage =
+			Profile.FullHolsterCharacterMontage.Get();
+		UAnimMontage* WeaponMontage =
+			Profile.FullHolsterWeaponMontage.Get();
+
+		UAnimInstance* CharacterAnimInstance = nullptr;
+		UAnimInstance* WeaponAnimInstance = nullptr;
+		const bool bHasWeaponLayer =
+			IsValid(WeaponMesh) && IsValid(WeaponMontage);
+
+		if (IsValid(CharacterMontage))
+		{
+			CharacterAnimInstance = CharacterMesh->GetAnimInstance();
+			if (!IsValid(CharacterAnimInstance))
+			{
+				return false;
+			}
+
+			if (bHasWeaponLayer)
+			{
+				WeaponAnimInstance = WeaponMesh->GetAnimInstance();
+				if (!IsValid(WeaponAnimInstance) ||
+					WeaponAnimInstance == CharacterAnimInstance)
+				{
+
+					return false;
+				}
+			}
+		}
+
+
+		PrepareDrawPresentationWatch();
+		CancelFastDrawTransition();
+
+		ReleaseFullHolsterPresentation(true);
+
+		if (bFullHolsterActive ||
+			!IsValid(FormalWeapon) ||
+			FormalWeapon != BoundWeapon.Get())
+		{
+			return false;
+		}
+
+		const uint64 RequestSerial = ++FullHolsterSerial;
+		ActiveFullHolsterWeapon = FormalWeapon;
+		bFullHolsterActive = true;
+		bFullHolsterLaunching = true;
+		bFullHolsterLayerCompleted[0] = false;
+		bFullHolsterLayerCompleted[1] = false;
+
+		if (!IsValid(CharacterMontage))
+		{
+			bFullHolsterLayerCompleted[0] = true;
+			bFullHolsterLayerCompleted[1] = true;
+			bFullHolsterLaunching = false;
+			TryFinishFullHolsterPresentation();
+			return true;
+		}
+
+		if (!PlayFullHolsterLayer(
+			0,
+			CharacterMesh,
+			CharacterMontage))
+		{
+			if (FullHolsterSerial == RequestSerial &&
+				bFullHolsterActive)
+			{
+				ReleaseFullHolsterPresentation(true);
+				return false;
+			}
+			return true;
+		}
+
+		if (bHasWeaponLayer)
+		{
+			if (!PlayFullHolsterLayer(
+				1,
+				WeaponMesh,
+				WeaponMontage))
+			{
+				if (FullHolsterSerial == RequestSerial &&
+					bFullHolsterActive)
+				{
+					ReleaseFullHolsterPresentation(true);
+					return false;
+				}
+				return true;
+			}
+		}
+		else
+		{
+			bFullHolsterLayerCompleted[1] = true;
+		}
+		if (FullHolsterSerial != RequestSerial ||
+			!bFullHolsterActive)
+		{
+			return true;
+		}
+
+		bFullHolsterLaunching = false;
+		TryFinishFullHolsterPresentation();
+		return true;
+	}
+
+	void UWeaponPresentationComponent::CancelFullHolsterPresentation()
+	{
+		const bool bWasActive = bFullHolsterActive;
+		ReleaseFullHolsterPresentation(true);
+
+		if (bWasActive)
+		{
+			OnFullHolsterPresentationCancelled.Broadcast();
+		}
+	}
+
+	bool UWeaponPresentationComponent::IsFullHolsterPresentationActive() const
+	{
+		return bFullHolsterActive;
+	}
+
+	bool UWeaponPresentationComponent::IsFullHolsterPresentationCurrent() const
+	{
+		AWeaponRuntime* FormalWeapon = ActiveFullHolsterWeapon.Get();
+		return bFullHolsterActive &&
+			IsValid(FormalWeapon) &&
+			FormalWeapon == BoundWeapon.Get();
+	}
+
+	bool UWeaponPresentationComponent::PlayFullHolsterLayer(
+		int32 Layer,
+		USkeletalMeshComponent * Mesh,
+		UAnimMontage * Montage)
+	{
+		if (Layer < 0 || Layer > 1 ||
+			!IsFullHolsterPresentationCurrent() ||
+			!IsValid(Mesh) ||
+			!IsValid(Montage))
+		{
+			return false;
+		}
+
+		UAnimInstance* AnimInstance = Mesh->GetAnimInstance();
+		if (!IsValid(AnimInstance))
+		{
+			return false;
+		}
+
+		const uint64 PlaybackSerial = FullHolsterSerial;
+		const float PlayedLength = AnimInstance->Montage_Play(
+			Montage,
+			1.0f,
+			EMontagePlayReturnType::MontageLength,
+			0.0f,
+			true);
+
+		FAnimMontageInstance* Instance =
+			AnimInstance->GetActiveInstanceForMontage(Montage);
+		const int32 InstanceId = Instance
+			? Instance->GetInstanceID()
+			: INDEX_NONE;
+
+		const bool bStillThisRequest =
+			FullHolsterSerial == PlaybackSerial &&
+			IsFullHolsterPresentationCurrent();
+
+		if (!bStillThisRequest)
+		{
+			return false;
+		}
+
+		if (!FMath::IsFinite(PlayedLength) || PlayedLength <= 0.0f || !Instance)
+		{
+			return false;
+		}
+
+		FullHolsterAnimInstances[Layer] = AnimInstance;
+		FullHolsterMontageInstanceIds[Layer] = InstanceId;
+		FullHolsterPreviousEnded[Layer] = Instance->OnMontageEnded;
+
+		const FOnMontageEnded PreviousEnded =
+			FullHolsterPreviousEnded[Layer];
+
+		FOnMontageEnded EndDelegate;
+		EndDelegate.BindWeakLambda(
+			this,
+			[this, PreviousEnded, PlaybackSerial, Layer, InstanceId]
+			(UAnimMontage* EndedMontage, bool bInterrupted)
+			{
+				PreviousEnded.ExecuteIfBound(
+					EndedMontage,
+					bInterrupted);
+
+				HandleFullHolsterLayerEnded(
+					PlaybackSerial,
+					Layer,
+					InstanceId,
+					bInterrupted);
+			});
+		Instance->OnMontageEnded = EndDelegate;
+
+		if (Layer == 0)
+		{
+			AnimInstance->OnPlayMontageNotifyBegin.AddUniqueDynamic(
+				this,
+				&UWeaponPresentationComponent::HandleFullHolsterCharacterNotifyBegin);
+		}
+		else
+		{
+			AnimInstance->OnPlayMontageNotifyBegin.AddUniqueDynamic(
+				this,
+				&UWeaponPresentationComponent::HandleFullHolsterWeaponNotifyBegin);
+		}
+
+		return true;
+	}
+
+	void UWeaponPresentationComponent::
+		HandleFullHolsterCharacterNotifyBegin(
+			FName NotifyName,
+			const FBranchingPointNotifyPayload & Payload)
+	{
+		HandleFullHolsterNotify(0, NotifyName, Payload);
+	}
+
+	void UWeaponPresentationComponent::
+		HandleFullHolsterWeaponNotifyBegin(
+			FName NotifyName,
+			const FBranchingPointNotifyPayload & Payload)
+	{
+		HandleFullHolsterNotify(1, NotifyName, Payload);
+	}
+
+	void UWeaponPresentationComponent::HandleFullHolsterNotify(
+		int32 Layer,
+		FName NotifyName,
+		const FBranchingPointNotifyPayload & Payload)
+	{
+		if (Layer < 0 || Layer > 1 ||
+			FullHolsterFinishedNotifyName.IsNone() ||
+			NotifyName != FullHolsterFinishedNotifyName ||
+			!bFullHolsterActive ||
+			Payload.MontageInstanceID !=
+			FullHolsterMontageInstanceIds[Layer])
+		{
+			return;
+		}
+		if (!IsFullHolsterPresentationCurrent())
+		{
+			CancelFullHolsterPresentation();
+			return;
+		}
+
+		bFullHolsterLayerCompleted[Layer] = true;
+		TryFinishFullHolsterPresentation();
+	}
+
+	void UWeaponPresentationComponent::HandleFullHolsterLayerEnded(
+		uint64 Serial,
+		int32 Layer,
+		int32 InstanceId,
+		bool bInterrupted)
+	{
+		if (Serial != FullHolsterSerial ||
+			Layer < 0 || Layer > 1 ||
+			!bFullHolsterActive ||
+			FullHolsterMontageInstanceIds[Layer] != InstanceId)
+		{
+			return;
+		}
+		if (!IsFullHolsterPresentationCurrent())
+		{
+			CancelFullHolsterPresentation();
+			return;
+		}
+
+		if (bInterrupted)
+		{
+			CancelFullHolsterPresentation();
+			return;
+		}
+
+		if (Layer == 1)
+		{
+			bFullHolsterLayerCompleted[1] = true;
+			TryFinishFullHolsterPresentation();
+			return;
+		}
+
+		if (!bFullHolsterLayerCompleted[0])
+		{
+			CancelFullHolsterPresentation();
+		}
+	}
+
+	void UWeaponPresentationComponent::TryFinishFullHolsterPresentation()
+	{
+		if (!IsFullHolsterPresentationCurrent() ||
+			bFullHolsterLaunching ||
+			!bFullHolsterLayerCompleted[0] ||
+			!bFullHolsterLayerCompleted[1])
+		{
+			return;
+		}
+
+		ReleaseFullHolsterPresentation(false);
+		OnFullHolsterPresentationReady.Broadcast();
+	}
+
+	void UWeaponPresentationComponent::ReleaseFullHolsterPresentation(
+		bool bStopMontages)
+	{
+		++FullHolsterSerial;
+		bFullHolsterActive = false;
+		bFullHolsterLaunching = false;
+		ActiveFullHolsterWeapon.Reset();
+
+		const TWeakObjectPtr<UAnimInstance> SavedAnimInstances[2] =
+		{
+			FullHolsterAnimInstances[0],
+			FullHolsterAnimInstances[1]
+		};
+		const int32 SavedInstanceIds[2] =
+		{
+			FullHolsterMontageInstanceIds[0],
+			FullHolsterMontageInstanceIds[1]
+		};
+		const FOnMontageEnded SavedPreviousEnded[2] =
+		{
+			FullHolsterPreviousEnded[0],
+			FullHolsterPreviousEnded[1]
+		};
+
+		for (int32 Layer = 0; Layer < 2; ++Layer)
+		{
+			FullHolsterAnimInstances[Layer].Reset();
+			FullHolsterMontageInstanceIds[Layer] = INDEX_NONE;
+			FullHolsterPreviousEnded[Layer].Unbind();
+			bFullHolsterLayerCompleted[Layer] = false;
+		}
+
+		for (int32 Layer = 0; Layer < 2; ++Layer)
+		{
+			UAnimInstance* AnimInstance = SavedAnimInstances[Layer].Get();
+			if (!IsValid(AnimInstance))
+			{
+				continue;
+			}
+
+			if (Layer == 0)
+			{
+				AnimInstance->OnPlayMontageNotifyBegin.RemoveDynamic(
+					this,
+					&UWeaponPresentationComponent::HandleFullHolsterCharacterNotifyBegin);
+			}
+			else
+			{
+				AnimInstance->OnPlayMontageNotifyBegin.RemoveDynamic(
+					this,
+					&UWeaponPresentationComponent::HandleFullHolsterWeaponNotifyBegin);
+			}
+
+			if (SavedInstanceIds[Layer] == INDEX_NONE)
+			{
+				continue;
+			}
+
+			FAnimMontageInstance* Instance =
+				AnimInstance->GetMontageInstanceForID(
+					SavedInstanceIds[Layer]);
+			if (!Instance)
+			{
+				continue;
+			}
+
+			if (Instance->OnMontageEnded.IsBoundToObject(this))
+			{
+				Instance->OnMontageEnded = SavedPreviousEnded[Layer];
+			}
+
+			if (bStopMontages)
+			{
+				Instance->Stop(FAlphaBlend(0.1f), true);
+			}
+		}
+	}

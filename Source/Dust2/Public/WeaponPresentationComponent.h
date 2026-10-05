@@ -132,6 +132,21 @@ UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
 		USkeletalMeshComponent* WeaponMesh,
 		UAnimMontage* WeaponMontage,
 		bool bFinalStage);
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
+		meta = (ReturnDisplayName = "Started"))
+	bool StartFullHolsterPresentation(
+		AWeaponRuntime* FormalWeapon,
+		USkeletalMeshComponent* CharacterMesh,
+		USkeletalMeshComponent* WeaponMesh,
+		const FWeaponPresentationProfile& Profile);
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+	void CancelFullHolsterPresentation();
+UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
+	bool IsFullHolsterPresentationActive() const;
+UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+	FWeaponPresentationSignal OnFullHolsterPresentationReady;
+UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+	FWeaponPresentationSignal OnFullHolsterPresentationCancelled;
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
 	FDrawPresentationFinishedEvent OnDrawPresentationFinished;
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
@@ -157,6 +172,10 @@ UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
 	FReloadWeaponPresentationEvent OnReloadRoundPresentationCommitted;
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
 	FReloadWeaponPresentationEvent OnReloadWeaponPresentationCompleted;
+UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "Weapon Presentation|Configuration",
+		meta = (DisplayName = "完整收枪完成通知名"))
+	FName FullHolsterFinishedNotifyName = TEXT("FullHolsterFinished");
 protected:
 
 UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
@@ -231,4 +250,36 @@ void ClearEarlyDrawSwitchRelease();
 	void HandleDrawLayerEnded(uint64 Serial, int32 Layer,
 		int32 InstanceId, bool bInterrupted);
 	void TryFinishDrawPresentationWatch();
+TWeakObjectPtr<AWeaponRuntime> ActiveFullHolsterWeapon;
+TWeakObjectPtr<UAnimInstance> FullHolsterAnimInstances[2];
+	int32 FullHolsterMontageInstanceIds[2] = { INDEX_NONE, INDEX_NONE };
+FOnMontageEnded FullHolsterPreviousEnded[2];
+	bool bFullHolsterLayerCompleted[2] = { false, false };
+	bool bFullHolsterActive = false;
+	bool bFullHolsterLaunching = false;
+	uint64 FullHolsterSerial = 0;
+	void ReleaseFullHolsterPresentation(bool bStopMontages);
+	void TryFinishFullHolsterPresentation();
+	bool IsFullHolsterPresentationCurrent() const;
+	bool PlayFullHolsterLayer(
+		int32 Layer,
+		USkeletalMeshComponent* Mesh,
+		UAnimMontage* Montage);
+	void HandleFullHolsterNotify(
+		int32 Layer,
+		FName NotifyName,
+		const FBranchingPointNotifyPayload& Payload);
+	void HandleFullHolsterLayerEnded(
+		uint64 Serial,
+		int32 Layer,
+		int32 InstanceId,
+		bool bInterrupted);
+UFUNCTION()
+	void HandleFullHolsterCharacterNotifyBegin(
+		FName NotifyName,
+		const FBranchingPointNotifyPayload& Payload);
+UFUNCTION()
+	void HandleFullHolsterWeaponNotifyBegin(
+		FName NotifyName,
+		const FBranchingPointNotifyPayload& Payload);
 };
