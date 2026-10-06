@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "Dust2PlayerCharacter.generated.h"
-
+class AWeaponRuntime;
 UCLASS()
 class DUST2_API ADust2PlayerCharacter : public ACharacter
 {
@@ -25,6 +25,11 @@ public:
 	bool ApplyHeal(float Amount);
 	UFUNCTION(BlueprintCallable,Category="Health")
 	void RestoreHealth(float SavedHealth);
+	UFUNCTION(BlueprintNativeEvent, BlueprintPure,
+		Category = "Weapon|Reload")
+	bool CanStartReloadRequest(AWeaponRuntime* FormalWeapon) const;
+	virtual bool CanStartReloadRequest_Implementation(
+		AWeaponRuntime* FormalWeapon) const;
 protected:
 	UPROPERTY(Transient, VisibleInstanceOnly, BlueprintReadOnly, Category = "Health")
 	float MaxHealth;

@@ -133,6 +133,10 @@ UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
 	void CancelFastDrawTransition();
 UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
 	bool IsFastDrawTransitionPending() const;
+UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
+	bool CanStartReloadPresentation(
+		AWeaponRuntime* FormalWeapon,
+		bool bPresentationSwitching) const;
 UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
 	void PrepareDrawPresentationWatch();
 UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
@@ -313,4 +317,8 @@ TWeakObjectPtr<AWeaponRuntime> ExpectedPresentationSwitchWeapon;
 	bool bPresentationSwitchCommitPending = false;
 	uint64 PresentationSwitchCommitSerial = 0;
 	void HandlePresentationSwitchCommitTimer(uint64 Serial);
+TWeakObjectPtr<AWeaponRuntime> ReloadBlockingDrawWeapon;
+TWeakObjectPtr<UAnimInstance> ReloadBlockingDrawAnimInstances[2];
+	int32 ReloadBlockingDrawInstanceIds[2] = { INDEX_NONE, INDEX_NONE };
+	void ClearReloadBlockingDrawSnapshot();
 };

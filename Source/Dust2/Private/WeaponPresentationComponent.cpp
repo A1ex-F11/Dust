@@ -26,6 +26,7 @@ void UWeaponPresentationComponent::SetWeaponForPresentation(
 	{
 		return;
 	}
+	ClearReloadBlockingDrawSnapshot();
 	CancelPresentationSwitchCommit(false);
 	ReleaseFullHolsterPresentation(true);
 	PrepareDrawPresentationWatch();
@@ -72,6 +73,7 @@ void UWeaponPresentationComponent::HandleReloadStarted()
 void UWeaponPresentationComponent::EndPlay(
 	const EEndPlayReason::Type EndPlayReason)
 {
+	ClearReloadBlockingDrawSnapshot();
 	CancelPresentationSwitchCommit(false);
 	ReleaseFullHolsterPresentation(true);
 	PrepareDrawPresentationWatch();
@@ -838,6 +840,7 @@ bool UWeaponPresentationComponent::WatchDrawPresentationCompletion(
 	UAnimMontage* WeaponMontage,
 	bool bFinalStage)
 {
+	ClearReloadBlockingDrawSnapshot();
 	PrepareDrawPresentationWatch();
 	WatchedDrawWeapon = FormalWeapon;
 	bDrawWatchFinalStage = bFinalStage;
@@ -855,6 +858,14 @@ bool UWeaponPresentationComponent::WatchDrawPresentationCompletion(
 	if (!bWatching)
 	{
 		bDrawWatchFailed = true;
+	}
+	ReloadBlockingDrawWeapon = WatchedDrawWeapon;
+	for (int32 Layer = 0; Layer < 2; ++Layer)
+	{
+		ReloadBlockingDrawAnimInstances[Layer] =
+			DrawWatchAnimInstances[Layer];
+		ReloadBlockingDrawInstanceIds[Layer] =
+			DrawWatchInstanceIds[Layer];
 	}
 	if (bWatching && bDrawWatchFinalStage)
 	{
@@ -1569,4 +1580,52 @@ bool UWeaponPresentationComponent::TryActivateVisualWeapon(
 	OutVisualWeapon = VisualWeapon;
 	OutProfile = CandidateProfile;
 	return true;
+}
+
+bool UWeaponPresentationComponent::CanStartReloadPresentation(
+	AWeaponRuntime* FormalWeapon,
+	bool bPresentationSwitching) const
+{
+	if (!IsValid(FormalWeapon)
+		|| BoundWeapon.Get() != FormalWeapon
+		|| bPresentationSwitching
+		|| bFullHolsterActive
+		|| bPresentationSwitchCommitPending
+		|| bFastDrawTransitionPending)
+	{
+		return false;
+	}
+
+	if (ReloadBlockingDrawWeapon.Get() == FormalWeapon)
+	{
+		for (int32 Layer = 0; Layer < 2; ++Layer)
+		{
+			UAnimInstance* AnimInstance =
+				ReloadBlockingDrawAnimInstances[Layer].Get();
+			const int32 InstanceId =
+				ReloadBlockingDrawInstanceIds[Layer];
+			if (!IsValid(AnimInstance) || InstanceId == INDEX_NONE)
+			{
+				continue;
+			}
+
+			FAnimMontageInstance* Instance =
+				AnimInstance->GetMontageInstanceForID(InstanceId);
+			if (Instance && Instance->IsValid())
+			{
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+void UWeaponPresentationComponent::ClearReloadBlockingDrawSnapshot()
+{
+	ReloadBlockingDrawWeapon.Reset();
+	for (int32 Layer = 0; Layer < 2; ++Layer)
+	{
+		ReloadBlockingDrawAnimInstances[Layer].Reset();
+		ReloadBlockingDrawInstanceIds[Layer] = INDEX_NONE;
+	}
 }

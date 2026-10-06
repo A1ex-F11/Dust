@@ -58,3 +58,9 @@ void ADust2PlayerCharacter::RestoreHealth(float SavedHealth)
 	CurrentHealth = FMath::Clamp(SavedHealth, 0.0f, MaxHealth);
 	bDeathRequested = false;
 }
+
+bool ADust2PlayerCharacter::CanStartReloadRequest_Implementation(
+	AWeaponRuntime* FormalWeapon) const
+{
+	return true;
+}
