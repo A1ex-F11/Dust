@@ -157,6 +157,14 @@ UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
 	void CancelFullHolsterPresentation();
 UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
 	bool IsFullHolsterPresentationActive() const;
+UFUNCTION(BlueprintCallable, BlueprintPure = false,
+		Category = "Weapon Presentation",
+		meta = (ReturnDisplayName = "Activated"))
+	bool TryActivateVisualWeapon(
+		AWeaponRuntime* FormalWeapon,
+		UChildActorComponent* VisualWeaponComponent,
+		AActor*& OutVisualWeapon,
+		FWeaponPresentationProfile& OutProfile);
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
 	FWeaponPresentationSignal OnFullHolsterPresentationReady;
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")

@@ -1524,3 +1524,49 @@ void UWeaponPresentationComponent::PlayFastHolsterPresentation(
 
 		OnPresentationSwitchCommitRequested.Broadcast(ExpectedWeapon);
 	}
+
+bool UWeaponPresentationComponent::TryActivateVisualWeapon(
+	AWeaponRuntime* FormalWeapon,
+	UChildActorComponent* VisualWeaponComponent,
+	AActor*& OutVisualWeapon,
+	FWeaponPresentationProfile& OutProfile)
+{
+	OutVisualWeapon = nullptr;
+	OutProfile = FWeaponPresentationProfile{};
+
+	AActor* PlayerOwner = GetOwner();
+	if (!IsValid(PlayerOwner)
+		|| !IsValid(FormalWeapon)
+		|| BoundWeapon.Get() != FormalWeapon
+		|| !IsValid(VisualWeaponComponent)
+		|| VisualWeaponComponent->GetOwner() != PlayerOwner
+		|| !VisualWeaponBaseClass)
+	{
+		return false;
+	}
+
+	FWeaponPresentationProfile CandidateProfile;
+	if (!FindWeaponPresentationProfile(FormalWeapon, CandidateProfile)
+		|| !CandidateProfile.bUseTacticalPresentation
+		|| !CandidateProfile.VisualWeaponClass
+		|| !CandidateProfile.VisualWeaponClass->IsChildOf(
+			VisualWeaponBaseClass.Get()))
+	{
+		return false;
+	}
+
+	AActor* VisualWeapon = VisualWeaponComponent->GetChildActor();
+	if (!IsValid(VisualWeapon)
+		|| !VisualWeapon->IsA(CandidateProfile.VisualWeaponClass.Get()))
+	{
+		return false;
+	}
+
+	VisualWeapon->SetOwner(PlayerOwner);
+	VisualWeapon->SetActorTickEnabled(false);
+	VisualWeapon->SetActorHiddenInGame(false);
+
+	OutVisualWeapon = VisualWeapon;
+	OutProfile = CandidateProfile;
+	return true;
+}
