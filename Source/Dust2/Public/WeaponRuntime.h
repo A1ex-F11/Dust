@@ -9,6 +9,26 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnFireCommitted);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnReloadStarted);
+USTRUCT(BlueprintType)
+struct FWeaponPickupState
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon|Pickup")
+	bool bHasSavedState = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon|Pickup")
+	int32 CurrentAmmo = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon|Pickup")
+	int32 ReserveAmmo = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon|Pickup")
+	EFireMode FireMode = EFireMode::SemiAutomatic;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon|Pickup")
+	bool bInitialDrawConsumed = false;
+};
 
 UCLASS()
 class DUST2_API AWeaponRuntime : public AActor
@@ -65,7 +85,14 @@ public:
 		bool bIsSlowWalking,
 		FVector& ShotDirection,
 		bool& bGenerated);
-
+	UFUNCTION(BlueprintPure, Category = "Weapon|Display")
+	static FText GetDisplayNameForWeaponClass(
+		TSubclassOf<AWeaponRuntime> WeaponClass);
+	UFUNCTION(BlueprintCallable, Category = "Weapon|Pickup")
+	void RestorePickupRuntimeState(const FWeaponPickupState& State);
+	UFUNCTION(BlueprintPure, Category = "Weapon|Pickup")
+	FWeaponPickupState CapturePickupRuntimeState(
+		bool bInitialDrawConsumed) const;
 
 protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon")
@@ -113,4 +140,7 @@ protected:
 	int32 PendingReloadAmount = 0;
 	UPROPERTY(Transient)
 	int32 ReloadRequestId = 0;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Display",
+		meta = (DisplayName = "武器展示名"))
+	FText WeaponDisplayName;
 };

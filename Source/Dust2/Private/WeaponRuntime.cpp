@@ -301,3 +301,30 @@ bool AWeaponRuntime::TryCommitReloadRound(int32 ExpectedReloadRequestId)
 
 	return true;
 }
+FText AWeaponRuntime::GetDisplayNameForWeaponClass(
+	TSubclassOf<AWeaponRuntime> WeaponClass)
+{
+	const AWeaponRuntime* Defaults = WeaponClass.GetDefaultObject();
+	return Defaults ? Defaults->WeaponDisplayName : FText::GetEmpty();
+}
+void AWeaponRuntime::RestorePickupRuntimeState(const FWeaponPickupState& State)
+{
+	if (!State.bHasSavedState)
+	{
+		return;
+	}
+
+	RestoreAmmo(State.CurrentAmmo, State.ReserveAmmo);
+	RestoreFireMode(State.FireMode);
+}
+FWeaponPickupState AWeaponRuntime::CapturePickupRuntimeState(
+	bool bInitialDrawConsumed) const
+{
+	FWeaponPickupState State;
+	State.bHasSavedState = true;
+	State.CurrentAmmo = GetCurrentAmmo();
+	State.ReserveAmmo = GetReserveAmmo();
+	State.FireMode = GetFireMode();
+	State.bInitialDrawConsumed = bInitialDrawConsumed;
+	return State;
+}
