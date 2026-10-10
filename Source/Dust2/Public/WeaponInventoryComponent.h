@@ -34,8 +34,28 @@ public:
 		UChildActorComponent* Slot2,
 		AWeaponRuntime* InitialCurrent);
 
+	// Call before rebuilding checkpoint slot actors. The next successful
+	// initialization refreshes presentation once for a valid restored weapon.
 	UFUNCTION(BlueprintCallable, Category = "Weapon|Inventory")
 	bool PrepareForExternalRestore();
+
+	// Rebuild both slots before the Blueprint binds delegates and calls
+	// InitializeNativeInventory once. Empty classes remain empty slots.
+	UFUNCTION(BlueprintCallable, Category = "Weapon|Inventory|Checkpoint")
+	bool RestoreCheckpointWeapons(
+		UChildActorComponent* Slot1,
+		UChildActorComponent* Slot2,
+		TSubclassOf<AWeaponRuntime> Slot1Class,
+		int32 Slot1CurrentAmmo,
+		int32 Slot1ReserveAmmo,
+		EFireMode Slot1FireMode,
+		bool bSlot1InitialDrawConsumed,
+		TSubclassOf<AWeaponRuntime> Slot2Class,
+		int32 Slot2CurrentAmmo,
+		int32 Slot2ReserveAmmo,
+		EFireMode Slot2FireMode,
+		bool bSlot2InitialDrawConsumed,
+		bool bSlot1Active);
 
 	UFUNCTION(BlueprintPure, Category = "Weapon|Inventory")
 	AWeaponRuntime* GetCurrentWeaponNative() const;
@@ -132,4 +152,7 @@ private:
 	bool bInventoryBusy = false;
 	bool bInitialized = false;
 	bool bEquippedPresentationRefreshRequested = false;
+	bool bExternalRestorePresentationPending = false;
+	bool bCheckpointLoadoutPendingInitialization = false;
+	bool bCheckpointRestoreFailed = false;
 };

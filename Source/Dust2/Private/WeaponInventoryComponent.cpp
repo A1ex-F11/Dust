@@ -37,11 +37,18 @@ bool UWeaponInventoryComponent::InitializeNativeInventory(
 	UChildActorComponent* Slot2,
 	AWeaponRuntime* InitialCurrent)
 {
-	if (bInventoryBusy || bInitialized || !IsRegistered())
+	if (bInventoryBusy || bInitialized || !IsRegistered() ||
+		bCheckpointRestoreFailed)
 	{
 		UE_LOG(LogWeaponInventoryComponent, Warning,
-			TEXT("Inventory init rejected: busy, already initialized, or unregistered component."));
+			TEXT("Inventory init rejected: busy, already initialized, unregistered, or failed checkpoint restore."));
 		return false;
+	}
+	// RestoreCheckpointWeapons has already selected the saved active slot.
+	// The Blueprint mirror is synchronized by OnInventoryChanged below.
+	if (bCheckpointLoadoutPendingInitialization)
+	{
+		InitialCurrent = CurrentWeapon.Get();
 	}
 
 	ADust2PlayerCharacter* Player = Cast<ADust2PlayerCharacter>(GetOwner());
@@ -73,6 +80,18 @@ bool UWeaponInventoryComponent::InitializeNativeInventory(
 	CurrentWeapon = InitialCurrent;
 	bInitialized = true;
 	BroadcastInventoryChanged();
+	bCheckpointLoadoutPendingInitialization = false;
+	bCheckpointRestoreFailed = false;
+	if (bExternalRestorePresentationPending)
+	{
+		bExternalRestorePresentationPending = false;
+		if (IsValid(InitialCurrent))
+		{
+			TGuardValue<bool> PresentationRefreshGuard(
+				bEquippedPresentationRefreshRequested, true);
+			OnEquippedWeaponChanged.Broadcast(InitialCurrent);
+		}
+	}
 	return true;
 }
 
@@ -94,6 +113,101 @@ bool UWeaponInventoryComponent::PrepareForExternalRestore()
 	Slot1Component = nullptr;
 	Slot2Component = nullptr;
 	bInitialized = false;
+	bExternalRestorePresentationPending = true;
+	bCheckpointLoadoutPendingInitialization = false;
+	bCheckpointRestoreFailed = false;
+	return true;
+}
+
+bool UWeaponInventoryComponent::RestoreCheckpointWeapons(
+	UChildActorComponent* Slot1,
+	UChildActorComponent* Slot2,
+	TSubclassOf<AWeaponRuntime> Slot1Class,
+	int32 Slot1CurrentAmmo,
+	int32 Slot1ReserveAmmo,
+	EFireMode Slot1FireMode,
+	bool bSlot1InitialDrawConsumed,
+	TSubclassOf<AWeaponRuntime> Slot2Class,
+	int32 Slot2CurrentAmmo,
+	int32 Slot2ReserveAmmo,
+	EFireMode Slot2FireMode,
+	bool bSlot2InitialDrawConsumed,
+	bool bSlot1Active)
+{
+	ADust2PlayerCharacter* Player = Cast<ADust2PlayerCharacter>(GetOwner());
+	if (bInventoryBusy || !IsRegistered() || !IsValid(Player) ||
+		!IsValid(Slot1) || !IsValid(Slot2) || Slot1 == Slot2 ||
+		!Slot1->IsRegistered() || !Slot2->IsRegistered() ||
+		Slot1->GetOwner() != Player || Slot2->GetOwner() != Player ||
+		(Slot1Class && !IsUsableWeaponClass(Slot1Class)) ||
+		(Slot2Class && !IsUsableWeaponClass(Slot2Class)))
+	{
+		UE_LOG(LogWeaponInventoryComponent, Warning,
+			TEXT("Checkpoint weapon restore rejected: invalid slot, owner, or weapon class."));
+		bCheckpointRestoreFailed = true;
+		return false;
+	}
+
+	if (!PrepareForExternalRestore())
+	{
+		bCheckpointRestoreFailed = true;
+		return false;
+	}
+
+	FWeaponPickupState Slot1State;
+	Slot1State.bHasSavedState = true;
+	Slot1State.CurrentAmmo = Slot1CurrentAmmo;
+	Slot1State.ReserveAmmo = Slot1ReserveAmmo;
+	Slot1State.FireMode = Slot1FireMode;
+	Slot1State.bInitialDrawConsumed = bSlot1InitialDrawConsumed;
+	FWeaponPickupState Slot2State;
+	Slot2State.bHasSavedState = true;
+	Slot2State.CurrentAmmo = Slot2CurrentAmmo;
+	Slot2State.ReserveAmmo = Slot2ReserveAmmo;
+	Slot2State.FireMode = Slot2FireMode;
+	Slot2State.bInitialDrawConsumed = bSlot2InitialDrawConsumed;
+
+	AWeaponRuntime* Slot1Weapon = nullptr;
+	AWeaponRuntime* Slot2Weapon = nullptr;
+	bool bSlot1Restored = true;
+	if (Slot1Class)
+	{
+		bSlot1Restored = CreateWeaponInSlot(
+			Slot1, Slot1Class, Slot1State, Slot1Weapon);
+	}
+	else
+	{
+		Slot1->SetChildActorClass(nullptr);
+	}
+	bool bSlot2Restored = bSlot1Restored;
+	if (bSlot2Restored && Slot2Class)
+	{
+		bSlot2Restored = CreateWeaponInSlot(
+			Slot2, Slot2Class, Slot2State, Slot2Weapon);
+	}
+	else if (bSlot2Restored)
+	{
+		Slot2->SetChildActorClass(nullptr);
+	}
+	if (!bSlot1Restored || !bSlot2Restored)
+	{
+		// Never expose a half-restored loadout as a successful checkpoint.
+		Slot1->SetChildActorClass(nullptr);
+		Slot2->SetChildActorClass(nullptr);
+		bExternalRestorePresentationPending = false;
+		bCheckpointRestoreFailed = true;
+		UE_LOG(LogWeaponInventoryComponent, Error,
+			TEXT("Checkpoint weapon restore failed while rebuilding a slot."));
+		return false;
+	}
+
+	AWeaponRuntime* RestoredCurrent = bSlot1Active ? Slot1Weapon : Slot2Weapon;
+	SetWeaponActorActive(Slot1Weapon, Slot1Weapon == RestoredCurrent);
+	SetWeaponActorActive(Slot2Weapon, Slot2Weapon == RestoredCurrent);
+	Slot1Component = Slot1;
+	Slot2Component = Slot2;
+	CurrentWeapon = RestoredCurrent;
+	bCheckpointLoadoutPendingInitialization = true;
 	return true;
 }
 
@@ -364,6 +478,9 @@ void UWeaponInventoryComponent::EndPlay(const EEndPlayReason::Type EndPlayReason
 	Slot1Component = nullptr;
 	Slot2Component = nullptr;
 	bInitialized = false;
+	bExternalRestorePresentationPending = false;
+	bCheckpointLoadoutPendingInitialization = false;
+	bCheckpointRestoreFailed = false;
 	Super::EndPlay(EndPlayReason);
 }
 
