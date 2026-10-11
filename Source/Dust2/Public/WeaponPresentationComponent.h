@@ -187,6 +187,15 @@ UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
 	FWeaponPresentationSignal OnFireEffectsPresentationRequested;
 UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
 		meta = (ReturnDisplayName = "Started"))
+	bool StartSynchronizedReloadPresentation(
+		AWeaponRuntime* FormalWeapon,
+		USkeletalMeshComponent* CharacterMesh,
+		UAnimMontage* CharacterMontage,
+		USkeletalMeshComponent* WeaponMesh,
+		UAnimMontage* WeaponMontage,
+		float PlayRate = 1.0f);
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
+		meta = (ReturnDisplayName = "Started"))
 	bool StartReloadWeaponPresentation(
 		AWeaponRuntime* FormalWeapon,
 		USkeletalMeshComponent* WeaponMesh,
@@ -245,6 +254,33 @@ UPROPERTY(Transient)
 
 	bool IsReloadWeaponPlaybackCurrent() const;
 	void ReleaseReloadWeaponPlayback(bool bStopMontage);
+	TWeakObjectPtr<AWeaponRuntime> ActiveSynchronizedReloadWeapon;
+	int32 ActiveSynchronizedReloadRequestId = 0;
+	TWeakObjectPtr<UAnimInstance> SynchronizedReloadAnimInstances[2];
+	TWeakObjectPtr<UAnimMontage> SynchronizedReloadMontages[2];
+	int32 SynchronizedReloadInstanceIds[2] = { INDEX_NONE, INDEX_NONE };
+	FOnMontageEnded SynchronizedReloadPreviousEndDelegates[2];
+	bool bSynchronizedReloadLayerPending[2] = { false, false };
+	bool bSynchronizedReloadPresentationActive = false;
+	bool bSynchronizedReloadPresentationLaunching = false;
+	uint64 SynchronizedReloadPlaybackSerial = 0;
+	bool IsSynchronizedReloadPlaybackCurrent() const;
+	bool PlaySynchronizedReloadLayer(
+		int32 Layer,
+		UAnimInstance* AnimInstance,
+		UAnimMontage* Montage,
+		float PlayRate,
+		uint64 PlaybackSerial);
+	void ReleaseSynchronizedReloadPlayback(
+		bool bStopMontages,
+		bool bCancelFormalReload);
+	void HandleSynchronizedReloadLayerEnded(
+		uint64 PlaybackSerial,
+		int32 Layer,
+		int32 InstanceId,
+		UAnimMontage* EndedMontage,
+		bool bInterrupted);
+
 
 	UFUNCTION()
 	void HandleReloadWeaponNotifyBegin(

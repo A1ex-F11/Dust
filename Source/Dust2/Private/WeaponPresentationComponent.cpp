@@ -500,6 +500,371 @@ bool UWeaponPresentationComponent::IsReloadWeaponPlaybackCurrent() const
 			ActiveReloadWeaponRequestId);
 }
 
+bool UWeaponPresentationComponent::IsSynchronizedReloadPlaybackCurrent() const
+{
+	return bSynchronizedReloadPresentationActive &&
+		ShouldCompleteReloadPresentation(
+			true,
+			ActiveSynchronizedReloadWeapon.Get(),
+			BoundWeapon.Get(),
+			ActiveSynchronizedReloadRequestId);
+}
+
+bool UWeaponPresentationComponent::PlaySynchronizedReloadLayer(
+	int32 Layer,
+	UAnimInstance* AnimInstance,
+	UAnimMontage* Montage,
+	float PlayRate,
+	uint64 PlaybackSerial)
+{
+	if (Layer < 0 || Layer > 1 || !IsValid(AnimInstance) ||
+		!IsValid(Montage))
+	{
+		return false;
+	}
+
+	const float PlayedLength = AnimInstance->Montage_Play(
+		Montage,
+		PlayRate,
+		EMontagePlayReturnType::MontageLength,
+		0.0f,
+		true);
+	if (PlayedLength <= 0.0f)
+	{
+		return false;
+	}
+
+	FAnimMontageInstance* Instance =
+		AnimInstance->GetActiveInstanceForMontage(Montage);
+	if (!Instance || Instance->Montage != Montage)
+	{
+		return false;
+	}
+
+	const int32 InstanceId = Instance->GetInstanceID();
+	if (PlaybackSerial != SynchronizedReloadPlaybackSerial ||
+		!bSynchronizedReloadPresentationActive ||
+		!bSynchronizedReloadPresentationLaunching)
+	{
+		return false;
+	}
+
+	SynchronizedReloadAnimInstances[Layer] = AnimInstance;
+	SynchronizedReloadMontages[Layer] = Montage;
+	SynchronizedReloadInstanceIds[Layer] = InstanceId;
+	bSynchronizedReloadLayerPending[Layer] = true;
+	return true;
+}
+
+bool UWeaponPresentationComponent::StartSynchronizedReloadPresentation(
+	AWeaponRuntime* FormalWeapon,
+	USkeletalMeshComponent* CharacterMesh,
+	UAnimMontage* CharacterMontage,
+	USkeletalMeshComponent* WeaponMesh,
+	UAnimMontage* WeaponMontage,
+	float PlayRate)
+{
+	if (!IsValid(FormalWeapon) ||
+		FormalWeapon != BoundWeapon.Get() ||
+		!FormalWeapon->IsReloading() ||
+		FormalWeapon->GetReloadRequestId() <= 0 ||
+		!IsValid(CharacterMesh) ||
+		!IsValid(CharacterMontage) ||
+		!IsValid(WeaponMesh) ||
+		!IsValid(WeaponMontage) ||
+		!FMath::IsFinite(PlayRate) ||
+		PlayRate <= KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	UAnimInstance* CharacterAnimInstance = CharacterMesh->GetAnimInstance();
+	UAnimInstance* WeaponAnimInstance = WeaponMesh->GetAnimInstance();
+	if (!IsValid(CharacterAnimInstance) ||
+		!IsValid(WeaponAnimInstance) ||
+		CharacterAnimInstance == WeaponAnimInstance)
+	{
+		return false;
+	}
+
+	const int32 PlaybackRequestId = FormalWeapon->GetReloadRequestId();
+	if (bSynchronizedReloadPresentationActive &&
+		ActiveSynchronizedReloadWeapon.Get() == FormalWeapon &&
+		ActiveSynchronizedReloadRequestId == PlaybackRequestId)
+	{
+		return false;
+	}
+
+	CancelReloadWeaponPresentation();
+	if (bSynchronizedReloadPresentationActive ||
+		!ShouldCompleteReloadPresentation(
+			true, FormalWeapon, BoundWeapon.Get(), PlaybackRequestId))
+	{
+		return false;
+	}
+
+	const uint64 PlaybackSerial = ++SynchronizedReloadPlaybackSerial;
+	ActiveSynchronizedReloadWeapon = FormalWeapon;
+	ActiveSynchronizedReloadRequestId = PlaybackRequestId;
+	bSynchronizedReloadPresentationActive = true;
+	bSynchronizedReloadPresentationLaunching = true;
+	const auto IsLaunchCurrent =
+		[this, FormalWeapon, PlaybackRequestId, PlaybackSerial]()
+		{
+			return PlaybackSerial == SynchronizedReloadPlaybackSerial &&
+				bSynchronizedReloadPresentationActive &&
+				bSynchronizedReloadPresentationLaunching &&
+				ActiveSynchronizedReloadWeapon.Get() == FormalWeapon &&
+				ActiveSynchronizedReloadRequestId == PlaybackRequestId;
+		};
+
+	if (!PlaySynchronizedReloadLayer(
+			0,
+			CharacterAnimInstance,
+			CharacterMontage,
+			PlayRate,
+			PlaybackSerial) ||
+		!PlaySynchronizedReloadLayer(
+			1,
+			WeaponAnimInstance,
+			WeaponMontage,
+			PlayRate,
+			PlaybackSerial))
+	{
+		if (IsLaunchCurrent())
+		{
+			CancelReloadWeaponPresentation();
+		}
+		return false;
+	}
+
+	for (int32 Layer = 0; Layer < 2; ++Layer)
+	{
+		if (!IsLaunchCurrent())
+		{
+			return false;
+		}
+
+		UAnimInstance* AnimInstance =
+			SynchronizedReloadAnimInstances[Layer].Get();
+		FAnimMontageInstance* Instance = AnimInstance
+			? AnimInstance->GetMontageInstanceForID(
+				SynchronizedReloadInstanceIds[Layer])
+			: nullptr;
+		if (!Instance ||
+			Instance->Montage != SynchronizedReloadMontages[Layer].Get())
+		{
+			if (IsLaunchCurrent())
+			{
+				CancelReloadWeaponPresentation();
+			}
+			return false;
+		}
+
+		SynchronizedReloadPreviousEndDelegates[Layer] =
+			Instance->OnMontageEnded;
+		const FOnMontageEnded PreviousEndDelegate =
+			SynchronizedReloadPreviousEndDelegates[Layer];
+		const int32 InstanceId = SynchronizedReloadInstanceIds[Layer];
+		FOnMontageEnded EndDelegate;
+		EndDelegate.BindWeakLambda(
+			this,
+			[this, PreviousEndDelegate, PlaybackSerial, Layer, InstanceId]
+			(UAnimMontage* EndedMontage, bool bInterrupted)
+			{
+				PreviousEndDelegate.ExecuteIfBound(
+					EndedMontage, bInterrupted);
+				HandleSynchronizedReloadLayerEnded(
+					PlaybackSerial,
+					Layer,
+					InstanceId,
+					EndedMontage,
+					bInterrupted);
+			});
+		Instance->OnMontageEnded = EndDelegate;
+	}
+
+	if (!IsLaunchCurrent() ||
+		!IsSynchronizedReloadPlaybackCurrent() ||
+		!bSynchronizedReloadLayerPending[0] ||
+		!bSynchronizedReloadLayerPending[1])
+	{
+		if (IsLaunchCurrent())
+		{
+			CancelReloadWeaponPresentation();
+		}
+		return false;
+	}
+
+	bSynchronizedReloadPresentationLaunching = false;
+	return true;
+}
+
+void UWeaponPresentationComponent::HandleSynchronizedReloadLayerEnded(
+	uint64 PlaybackSerial,
+	int32 Layer,
+	int32 InstanceId,
+	UAnimMontage* EndedMontage,
+	bool bInterrupted)
+{
+	if (Layer < 0 || Layer > 1 ||
+		PlaybackSerial != SynchronizedReloadPlaybackSerial ||
+		!bSynchronizedReloadPresentationActive ||
+		!bSynchronizedReloadLayerPending[Layer] ||
+		SynchronizedReloadInstanceIds[Layer] != InstanceId ||
+		SynchronizedReloadMontages[Layer].Get() != EndedMontage)
+	{
+		return;
+	}
+
+	if (bInterrupted || !IsSynchronizedReloadPlaybackCurrent())
+	{
+		bSynchronizedReloadLayerPending[Layer] = false;
+		CancelReloadWeaponPresentation();
+		return;
+	}
+
+	UAnimInstance* AnimInstance =
+		SynchronizedReloadAnimInstances[Layer].Get();
+	if (IsValid(AnimInstance))
+	{
+		if (FAnimMontageInstance* Instance =
+			AnimInstance->GetMontageInstanceForID(InstanceId))
+		{
+			if (Instance->Montage == EndedMontage &&
+				Instance->OnMontageEnded.IsBoundToObject(this))
+			{
+				Instance->OnMontageEnded =
+					SynchronizedReloadPreviousEndDelegates[Layer];
+			}
+		}
+	}
+
+	bSynchronizedReloadLayerPending[Layer] = false;
+	SynchronizedReloadAnimInstances[Layer].Reset();
+	SynchronizedReloadMontages[Layer].Reset();
+	SynchronizedReloadInstanceIds[Layer] = INDEX_NONE;
+	SynchronizedReloadPreviousEndDelegates[Layer].Unbind();
+
+	if (bSynchronizedReloadLayerPending[0] ||
+		bSynchronizedReloadLayerPending[1])
+	{
+		return;
+	}
+
+	AWeaponRuntime* CompletedWeapon =
+		ActiveSynchronizedReloadWeapon.Get();
+	const int32 CompletedRequestId = ActiveSynchronizedReloadRequestId;
+	const bool bCanComplete = IsSynchronizedReloadPlaybackCurrent();
+	ReleaseSynchronizedReloadPlayback(false, false);
+	const uint64 ReleasedPlaybackSerial = SynchronizedReloadPlaybackSerial;
+	if (bCanComplete)
+	{
+		OnReloadWeaponPresentationCompleted.Broadcast(
+			CompletedWeapon, CompletedRequestId);
+		return;
+	}
+
+	if (IsValid(CompletedWeapon) && CompletedRequestId > 0 &&
+		CompletedWeapon->IsReloading() &&
+		CompletedWeapon->GetReloadRequestId() == CompletedRequestId)
+	{
+		CompletedWeapon->CancelReload();
+	}
+	if (SynchronizedReloadPlaybackSerial == ReleasedPlaybackSerial &&
+		!bSynchronizedReloadPresentationActive &&
+		!bSynchronizedReloadPresentationLaunching &&
+		ActiveReloadMontageInstanceId == INDEX_NONE)
+	{
+		StopReloadPresentationSounds();
+	}
+}
+
+void UWeaponPresentationComponent::ReleaseSynchronizedReloadPlayback(
+	bool bStopMontages,
+	bool bCancelFormalReload)
+{
+	const bool bHadPlayback =
+		bSynchronizedReloadPresentationActive ||
+		bSynchronizedReloadPresentationLaunching;
+	const TWeakObjectPtr<AWeaponRuntime> SavedWeapon =
+		ActiveSynchronizedReloadWeapon;
+	const int32 SavedRequestId = ActiveSynchronizedReloadRequestId;
+	const TWeakObjectPtr<UAnimInstance> SavedAnimInstances[2] =
+	{
+		SynchronizedReloadAnimInstances[0],
+		SynchronizedReloadAnimInstances[1]
+	};
+	const TWeakObjectPtr<UAnimMontage> SavedMontages[2] =
+	{
+		SynchronizedReloadMontages[0],
+		SynchronizedReloadMontages[1]
+	};
+	const int32 SavedInstanceIds[2] =
+	{
+		SynchronizedReloadInstanceIds[0],
+		SynchronizedReloadInstanceIds[1]
+	};
+	const FOnMontageEnded SavedPreviousEndDelegates[2] =
+	{
+		SynchronizedReloadPreviousEndDelegates[0],
+		SynchronizedReloadPreviousEndDelegates[1]
+	};
+	const bool bSavedLayerPending[2] =
+	{
+		bSynchronizedReloadLayerPending[0],
+		bSynchronizedReloadLayerPending[1]
+	};
+
+	++SynchronizedReloadPlaybackSerial;
+	ActiveSynchronizedReloadWeapon.Reset();
+	ActiveSynchronizedReloadRequestId = 0;
+	bSynchronizedReloadPresentationActive = false;
+	bSynchronizedReloadPresentationLaunching = false;
+	AWeaponRuntime* WeaponToCancel = SavedWeapon.Get();
+	if (bCancelFormalReload && bHadPlayback && IsValid(WeaponToCancel) &&
+		SavedRequestId > 0 && WeaponToCancel->IsReloading() &&
+		WeaponToCancel->GetReloadRequestId() == SavedRequestId)
+	{
+		WeaponToCancel->CancelReload();
+	}
+
+	for (int32 Layer = 0; Layer < 2; ++Layer)
+	{
+		SynchronizedReloadAnimInstances[Layer].Reset();
+		SynchronizedReloadMontages[Layer].Reset();
+		SynchronizedReloadInstanceIds[Layer] = INDEX_NONE;
+		SynchronizedReloadPreviousEndDelegates[Layer].Unbind();
+		bSynchronizedReloadLayerPending[Layer] = false;
+	}
+
+	for (int32 Layer = 0; Layer < 2; ++Layer)
+	{
+		UAnimInstance* AnimInstance = SavedAnimInstances[Layer].Get();
+		if (!IsValid(AnimInstance) || SavedInstanceIds[Layer] == INDEX_NONE)
+		{
+			continue;
+		}
+
+		FAnimMontageInstance* Instance =
+			AnimInstance->GetMontageInstanceForID(SavedInstanceIds[Layer]);
+		if (!Instance || Instance->Montage != SavedMontages[Layer].Get())
+		{
+			continue;
+		}
+
+		if (Instance->OnMontageEnded.IsBoundToObject(this))
+		{
+			Instance->OnMontageEnded = SavedPreviousEndDelegates[Layer];
+		}
+		if (bStopMontages && bSavedLayerPending[Layer])
+		{
+			Instance->Stop(FAlphaBlend(0.1f), true);
+		}
+	}
+
+}
+
 bool UWeaponPresentationComponent::StartReloadWeaponPresentation(
 	AWeaponRuntime* FormalWeapon,
 	USkeletalMeshComponent* WeaponMesh,
@@ -652,8 +1017,19 @@ void UWeaponPresentationComponent::ReleaseReloadWeaponPlayback(
 
 void UWeaponPresentationComponent::CancelReloadWeaponPresentation(bool bStopMontage)
 {
+	const uint64 PreviousReloadSerial = ReloadWeaponPlaybackSerial;
+	const uint64 PreviousSynchronizedSerial =
+		SynchronizedReloadPlaybackSerial;
 	ReleaseReloadWeaponPlayback(bStopMontage);
-	StopReloadPresentationSounds();
+	ReleaseSynchronizedReloadPlayback(bStopMontage, true);
+	if (ReloadWeaponPlaybackSerial == PreviousReloadSerial + 1 &&
+		SynchronizedReloadPlaybackSerial == PreviousSynchronizedSerial + 1 &&
+		ActiveReloadMontageInstanceId == INDEX_NONE &&
+		!bSynchronizedReloadPresentationActive &&
+		!bSynchronizedReloadPresentationLaunching)
+	{
+		StopReloadPresentationSounds();
+	}
 }
 bool UWeaponPresentationComponent::ShouldUseFastDrawPresentation(
 	const FWeaponPresentationProfile& PresentationProfile,
