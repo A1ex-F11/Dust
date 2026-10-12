@@ -75,10 +75,10 @@ namespace Dust2ShotTracerAssetSetup
 		Material->GetExpressionCollection().AddExpression(Expression);
 	}
 
-	static UMaterial* BuildTracerMaterial()
+	static UMaterial* BuildTracerMaterial(UMaterial* Existing = nullptr)
 	{
-		UMaterial* Material = NewObject<UMaterial>(GetTransientPackage(), NAME_None, RF_Transient);
-		Material->BlendMode = BLEND_Additive;
+		UMaterial* Material = Existing ? Existing : NewObject<UMaterial>(GetTransientPackage(), NAME_None, RF_Transient);
+		Material->BlendMode = BLEND_Translucent;
 		Material->SetShadingModel(MSM_Unlit);
 		Material->TwoSided = true;
 		Material->bUsedWithNiagaraSprites = true;
@@ -88,29 +88,41 @@ namespace Dust2ShotTracerAssetSetup
 		UMaterialExpressionParticleColor* ParticleColor = NewObject<UMaterialExpressionParticleColor>(Material);
 		AddExpression(Material, ParticleColor, -500, -100);
 
-		UMaterialExpressionConstant* Intensity = NewObject<UMaterialExpressionConstant>(Material);
-		Intensity->R = 8.0f;
-		AddExpression(Material, Intensity, -500, 40);
-
-		UMaterialExpressionMultiply* Emissive = NewObject<UMaterialExpressionMultiply>(Material);
-		Emissive->A.Expression = ParticleColor;
-		Emissive->B.Expression = Intensity;
-		AddExpression(Material, Emissive, -200, -100);
-		Material->GetEditorOnlyData()->EmissiveColor.Expression = Emissive;
-
 		UMaterialExpressionTextureCoordinate* UV = NewObject<UMaterialExpressionTextureCoordinate>(Material);
 		UV->CoordinateIndex = 0;
 		AddExpression(Material, UV, -500, 250);
 
+		// Alpha blending preserves a colored body against bright backgrounds.
+		// Sprite alignment follows its Y axis, so X is the width of the streak.
+		UMaterialExpressionCustom* Body = NewObject<UMaterialExpressionCustom>(Material);
+		Body->Description = TEXT("Tracer orange body and pale core v2");
+		Body->OutputType = CMOT_Float3;
+		Body->Code = TEXT("float across = abs(UV.x * 2.0 - 1.0);\nfloat core = 1.0 - smoothstep(0.12, 0.42, across);\nfloat3 body = max(Color.rgb, 0.0) * float3(0.85, 0.28, 0.04);\nreturn lerp(body, float3(3.0, 2.2, 1.25), core);");
+		FCustomInput BodyUV;
+		BodyUV.InputName = TEXT("UV");
+		BodyUV.Input.Expression = UV;
+		Body->Inputs.Add(BodyUV);
+		FCustomInput BodyColor;
+		BodyColor.InputName = TEXT("Color");
+		BodyColor.Input.Expression = ParticleColor;
+		Body->Inputs.Add(BodyColor);
+		AddExpression(Material, Body, -180, -100);
+		Material->GetEditorOnlyData()->EmissiveColor.Expression = Body;
+
 		UMaterialExpressionCustom* EdgeFade = NewObject<UMaterialExpressionCustom>(Material);
-		EdgeFade->Description = TEXT("Tracer soft edge fade");
+		EdgeFade->Description = TEXT("Tracer soft opaque body v2");
 		EdgeFade->OutputType = CMOT_Float1;
-		EdgeFade->Code = TEXT("float2 q = abs(UV * 2.0 - 1.0);\nreturn pow(saturate(1.0 - q.x), 2.0) * sqrt(saturate(1.0 - q.y));");
+		EdgeFade->Code = TEXT("float2 q = abs(UV * 2.0 - 1.0);\nfloat sides = 1.0 - smoothstep(0.65, 1.0, q.x);\nfloat ends = 1.0 - smoothstep(0.75, 1.0, q.y);\nreturn saturate(0.92 * sides * ends * Alpha);");
 		FCustomInput UVInput;
 		UVInput.InputName = TEXT("UV");
 		UVInput.Input.Expression = UV;
 		EdgeFade->Inputs.Add(UVInput);
-		AddExpression(Material, EdgeFade, -200, 250);
+		FCustomInput AlphaInput;
+		AlphaInput.InputName = TEXT("Alpha");
+		AlphaInput.Input.Expression = ParticleColor;
+		AlphaInput.Input.OutputIndex = 4;
+		EdgeFade->Inputs.Add(AlphaInput);
+		AddExpression(Material, EdgeFade, -180, 250);
 		Material->GetEditorOnlyData()->Opacity.Expression = EdgeFade;
 
 		Material->PostEditChange();
@@ -594,7 +606,7 @@ namespace Dust2ShotTracerAssetSetup
 			return;
 		}
 
-		UE_LOG(LogTemp, Display, TEXT("[TracerAssets] BUILD_SUCCESS: saved %s and %s; CPU, local-space, one burst particle; particle lifetime is User.TracerLifetime; additive unlit material retains depth test."), *MakeObjectPath(MaterialName), *MakeObjectPath(SystemName));
+		UE_LOG(LogTemp, Display, TEXT("[TracerAssets] BUILD_SUCCESS: saved %s and %s; CPU, local-space, one burst particle; particle lifetime is User.TracerLifetime; translucent orange-body/pale-core material retains depth test."), *MakeObjectPath(MaterialName), *MakeObjectPath(SystemName));
 		UE_LOG(LogTemp, Display, TEXT("[TracerAssets] Existing M_TracerGlow was preserved. No weapon Blueprint or gameplay state was modified."));
 	}
 
@@ -669,11 +681,11 @@ namespace Dust2ShotTracerAssetSetup
 				}
 			}
 		}
-		const bool bMaterial = Material->BlendMode == BLEND_Additive && Material->GetShadingModels().HasShadingModel(MSM_Unlit)
+		const bool bMaterial = Material->BlendMode == BLEND_Translucent && Material->GetShadingModels().HasShadingModel(MSM_Unlit)
 			&& Material->TwoSided && Material->bUsedWithNiagaraSprites && !Material->bDisableDepthTest
 			&& !Material->IsCompilingOrHadCompileError(GMaxRHIShaderPlatform);
 		const bool bCompile = VerifySystemCompile(System);
-		UE_LOG(LogTemp, Display, TEXT("[TracerAssets] VERIFY_RESULT userParams=%s renderer=%s cpu=%s local=%s additiveUnlitDepthTest=%s compile=%s"),
+		UE_LOG(LogTemp, Display, TEXT("[TracerAssets] VERIFY_RESULT userParams=%s renderer=%s cpu=%s local=%s translucentUnlitDepthTest=%s compile=%s"),
 			bUserParameters ? TEXT("OK") : TEXT("FAIL"), bRenderer ? TEXT("OK") : TEXT("FAIL"), bCPU ? TEXT("OK") : TEXT("FAIL"),
 			bLocal ? TEXT("OK") : TEXT("FAIL"), bMaterial ? TEXT("OK") : TEXT("FAIL"), bCompile ? TEXT("OK") : TEXT("FAIL"));
 		if (bUserParameters && bRenderer && bCPU && bLocal && bMaterial && bCompile)
@@ -743,6 +755,36 @@ namespace Dust2ShotTracerAssetSetup
 		}
 		UE_LOG(LogTemp, Display, TEXT("[TracerAssets] REPAIR_SUCCESS loop=Once backup=%s"), *Backup);
 	}
+
+	static void UpgradeTracerMaterial()
+	{
+		UMaterial* Material = LoadObject<UMaterial>(nullptr, *MakeObjectPath(MaterialName));
+		if (!Material) { UE_LOG(LogTemp, Error, TEXT("[TracerAssets] MATERIAL_FAILED missing material")); return; }
+		const UMaterialExpressionCustom* Current = Cast<UMaterialExpressionCustom>(Material->GetEditorOnlyData()->EmissiveColor.Expression);
+		if (Material->BlendMode == BLEND_Translucent && Current && Current->Description == TEXT("Tracer orange body and pale core v2"))
+		{
+			UE_LOG(LogTemp, Display, TEXT("[TracerAssets] MATERIAL_SUCCESS already upgraded")); return;
+		}
+		// Only upgrade the known generated baseline; preserve user-created material graphs.
+		if (Material->BlendMode != BLEND_Additive || !Cast<UMaterialExpressionMultiply>(Material->GetEditorOnlyData()->EmissiveColor.Expression))
+		{
+			UE_LOG(LogTemp, Error, TEXT("[TracerAssets] MATERIAL_FAILED unexpected baseline; not modified")); return;
+		}
+		const FString Filename = FPackageName::LongPackageNameToFilename(MakePackageName(MaterialName), FPackageName::GetAssetPackageExtension());
+		const FString Backup = FPaths::ProjectSavedDir() / TEXT("TracerBackups") / (TEXT("Material-") + FDateTime::Now().ToString(TEXT("%Y%m%d-%H%M%S")));
+		IFileManager::Get().MakeDirectory(*Backup, true);
+		if (IFileManager::Get().Copy(*(Backup / TEXT("M_ShotTracerGlow.uasset")), *Filename) != COPY_OK)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[TracerAssets] MATERIAL_FAILED backup failed")); return;
+		}
+		BuildTracerMaterial(Material);
+		if (Material->IsCompilingOrHadCompileError(GMaxRHIShaderPlatform) || !SaveAsset(Material, MakePackageName(MaterialName)))
+		{
+			UE_LOG(LogTemp, Error, TEXT("[TracerAssets] MATERIAL_FAILED compile/save failed backup=%s"), *Backup); return;
+		}
+		UE_LOG(LogTemp, Display, TEXT("[TracerAssets] MATERIAL_SUCCESS orange body / pale core / alpha blend; backup=%s"), *Backup);
+	}
+	static FAutoConsoleCommand MaterialCommand(TEXT("Dust2.UpgradeTracerMaterial"), TEXT("Upgrade only the generated tracer material with a previous-version backup."), FConsoleCommandDelegate::CreateStatic(&UpgradeTracerMaterial));
 
 	static FAutoConsoleCommand RepairCommand(TEXT("Dust2.RepairTracerLifetime"), TEXT("Repair generated tracer loop configuration with a previous-version backup."), FConsoleCommandDelegate::CreateStatic(&RepairGeneratedLifetime));
 	static FAutoConsoleCommand BuildCommand(

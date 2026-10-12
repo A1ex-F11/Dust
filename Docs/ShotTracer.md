@@ -11,6 +11,7 @@
 - Dust2.VerifyTracerWiring：只读验证保存后的执行链和终点来源。
 - Dust2.InspectTracerWiring：只读检查相关组件和射线节点。
 - Dust2.RepairTracerLifetime：本轮生成资产的生命周期修正工具，保存前备份。
+- Dust2.UpgradeTracerMaterial：备份并将已生成的加法材质升级为半透明橙色主体、浅色亮芯；只修改材质，不重新安装蓝图或重置枪口与粒子参数。
 
 当前本地接入使用 BP_Dust2_TacticalPresentationTest.TacticalPresentationWeapon 上作者武器的 MuzzleFlash 世界位置，支持该测试玩家当前切换的武器。其他玩家类的转换失败会安全跳过曳光；正式玩家接回属于后续任务。Trace 后 Sequence.Then0 只走视觉表现，Then1 保留原命中伤害分支。DrawDebugType 从 ForDuration 改为 None。
 
@@ -18,4 +19,4 @@
 
 本地材质和 Niagara 系统位于 /Game/Code/VFX/Tracer。保留原 M_TracerGlow。蓝图和 Content 不在此源码仓库；SavedAssetFlightAndCleanup 测试需要真实工程中生成的 NS_ShotTracer，源码镜像单独克隆不含完整可运行游戏。
 
-用户 PIE 画面和手感尚待确认。自动模拟通过不替代枪口视觉、空弹/换弹拒绝、切枪后当前枪口以及原伤害/扣弹的用户运行检查。五枪已接受的后坐/散布配置未修改，W05暂缓。
+用户已确认曳光可见，并自行调整了枪口位置；随后反馈明亮背景下不明显。本次材质改为 Translucent/Unlit，保留深度测试，以最高0.92透明度的橙色主体遮盖部分明亮背景，中央窄亮芯保留发光感。新版明亮场景 PIE 效果尚待用户确认。自动模拟通过不替代枪口视觉、空弹/换弹拒绝、切枪后当前枪口以及原伤害/扣弹的用户运行检查。五枪已接受的后坐/散布配置未修改，W05暂缓。
