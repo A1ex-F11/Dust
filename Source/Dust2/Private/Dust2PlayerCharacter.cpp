@@ -3,6 +3,10 @@
 #include "WeaponPickupActor.h"
 #include "UObject/UnrealType.h"
 #include "GameFramework/PlayerController.h"
+#include "WeaponInventoryComponent.h"
+#include "CameraRecoilRecoveryComponent.h"
+#include "Components/ChildActorComponent.h"
+#include "Templates/UnrealTemplate.h"
 
 ADust2PlayerCharacter::ADust2PlayerCharacter()
 {
@@ -287,6 +291,7 @@ void ADust2PlayerCharacter::RefreshAimedWeaponPickup()
 void ADust2PlayerCharacter::EndPlay(
     const EEndPlayReason::Type EndPlayReason)
 {
+    UnbindInventoryBridge();
     if (UWorld* World = GetWorld())
     {
         World->GetTimerManager().ClearTimer(PickupFocusTimerHandle);
@@ -301,6 +306,95 @@ void ADust2PlayerCharacter::EndPlay(
     LastAimedPickup.Reset();
     bHadAimedPickup = false;
     Super::EndPlay(EndPlayReason);
+}
+
+bool ADust2PlayerCharacter::InitializePlayerInventoryBridge(
+    UWeaponInventoryComponent* Inventory,
+    UChildActorComponent* Slot1,
+    UChildActorComponent* Slot2,
+    AWeaponRuntime* InitialCurrent,
+    UCameraRecoilRecoveryComponent* RecoilRecovery)
+{
+    if (bInventoryBridgeInitializing || !IsValid(Inventory) ||
+        Inventory->GetOwner() != this || !IsValid(Slot1) ||
+        !IsValid(Slot2) || Slot1 == Slot2 ||
+        Slot1->GetOwner() != this || Slot2->GetOwner() != this ||
+        !IsValid(RecoilRecovery) || RecoilRecovery->GetOwner() != this ||
+        (IsValid(BridgedInventory) && BridgedInventory != Inventory))
+    {
+        return false;
+    }
+
+    TGuardValue<bool> InitializingGuard(bInventoryBridgeInitializing, true);
+    const bool bAlreadyBridged = BridgedInventory == Inventory;
+    UCameraRecoilRecoveryComponent* PreviousRecoil = BridgedRecoilRecovery;
+    BridgedInventory = Inventory;
+    BridgedRecoilRecovery = RecoilRecovery;
+    Inventory->OnInventoryChanged.AddUniqueDynamic(
+        this, &ADust2PlayerCharacter::HandleInventoryBridgeChanged);
+    Inventory->OnBeforeWeaponChange.AddUniqueDynamic(
+        this, &ADust2PlayerCharacter::HandleInventoryBridgeBeforeChange);
+    Inventory->OnEquippedWeaponChanged.AddUniqueDynamic(
+        this, &ADust2PlayerCharacter::HandleInventoryBridgeEquipped);
+
+    const bool bInitialized = Inventory->InitializeNativeInventory(
+        Slot1, Slot2, InitialCurrent);
+    if (!bInitialized)
+    {
+        if (!bAlreadyBridged)
+        {
+            UnbindInventoryBridge();
+        }
+        else
+        {
+            // A rejected duplicate init must not detach the working bridge.
+            BridgedRecoilRecovery = PreviousRecoil;
+        }
+    }
+    return bInitialized;
+}
+
+void ADust2PlayerCharacter::HandleInventoryBridgeChanged(
+    AWeaponRuntime* Slot1Weapon, AWeaponRuntime* Slot2Weapon,
+    AWeaponRuntime* CurrentWeapon)
+{
+    if (IsValid(BridgedInventory))
+    {
+        BridgedInventory->SyncLegacyWeaponReferences();
+    }
+}
+
+void ADust2PlayerCharacter::HandleInventoryBridgeBeforeChange(
+    AWeaponRuntime* OldWeapon)
+{
+    ReceiveBeforeInventoryWeaponChange(OldWeapon);
+}
+
+void ADust2PlayerCharacter::HandleInventoryBridgeEquipped(
+    AWeaponRuntime* NewWeapon)
+{
+    const bool bRefreshPresentation = IsValid(BridgedInventory) &&
+        BridgedInventory->ShouldRefreshEquippedPresentation();
+    if (IsValid(BridgedRecoilRecovery))
+    {
+        BridgedRecoilRecovery->StartRecovery();
+    }
+    ReceiveInventoryWeaponChanged(NewWeapon, bRefreshPresentation);
+}
+
+void ADust2PlayerCharacter::UnbindInventoryBridge()
+{
+    if (IsValid(BridgedInventory))
+    {
+        BridgedInventory->OnInventoryChanged.RemoveDynamic(
+            this, &ADust2PlayerCharacter::HandleInventoryBridgeChanged);
+        BridgedInventory->OnBeforeWeaponChange.RemoveDynamic(
+            this, &ADust2PlayerCharacter::HandleInventoryBridgeBeforeChange);
+        BridgedInventory->OnEquippedWeaponChanged.RemoveDynamic(
+            this, &ADust2PlayerCharacter::HandleInventoryBridgeEquipped);
+    }
+    BridgedInventory = nullptr;
+    BridgedRecoilRecovery = nullptr;
 }
 bool ADust2PlayerCharacter::HasConsumedPickupInitialDraw_Implementation(
     AWeaponRuntime* FormalWeapon) const

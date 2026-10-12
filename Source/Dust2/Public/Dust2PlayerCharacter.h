@@ -8,6 +8,9 @@
 #include "WeaponRuntime.h"
 #include "Dust2PlayerCharacter.generated.h"
 class AWeaponRuntime;
+class UWeaponInventoryComponent;
+class UChildActorComponent;
+class UCameraRecoilRecoveryComponent;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnAimedWeaponPickupChanged, AActor*, AimedPickup);
 UCLASS()
@@ -17,6 +20,24 @@ class DUST2_API ADust2PlayerCharacter : public ACharacter
 
 public:
 	ADust2PlayerCharacter();
+	// Replace the three Blueprint inventory bindings and initialization call.
+	// Blueprint presentation handlers must be implemented before calling this.
+	UFUNCTION(BlueprintCallable, Category = "Weapon|Inventory",
+		meta = (DisplayName = "Initialize Player Inventory Bridge"))
+	bool InitializePlayerInventoryBridge(
+		UWeaponInventoryComponent* Inventory,
+		UChildActorComponent* Slot1,
+		UChildActorComponent* Slot2,
+		AWeaponRuntime* InitialCurrent,
+		UCameraRecoilRecoveryComponent* RecoilRecovery);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Weapon|Inventory")
+	void ReceiveBeforeInventoryWeaponChange(AWeaponRuntime* OldWeapon);
+
+	// Refresh permission is captured inside the synchronous inventory event.
+	UFUNCTION(BlueprintImplementableEvent, Category = "Weapon|Inventory")
+	void ReceiveInventoryWeaponChanged(
+		AWeaponRuntime* NewWeapon, bool bRefreshPresentation);
 	UFUNCTION(BlueprintPure,Category="Health")
 	float GetMaxHealth() const;
 	UFUNCTION(BlueprintPure, Category = "Health")
@@ -81,4 +102,19 @@ protected:
 	bool bHadAimedPickup = false;
 	AActor* FindNearbyWeaponPickupNative(
 	bool bAutomaticOnly, AActor* ExcludedPickup) const;
+
+private:
+	UFUNCTION()
+	void HandleInventoryBridgeChanged(AWeaponRuntime* Slot1Weapon,
+		AWeaponRuntime* Slot2Weapon, AWeaponRuntime* CurrentWeapon);
+	UFUNCTION()
+	void HandleInventoryBridgeBeforeChange(AWeaponRuntime* OldWeapon);
+	UFUNCTION()
+	void HandleInventoryBridgeEquipped(AWeaponRuntime* NewWeapon);
+	void UnbindInventoryBridge();
+	UPROPERTY(Transient)
+	TObjectPtr<UWeaponInventoryComponent> BridgedInventory;
+	UPROPERTY(Transient)
+	TObjectPtr<UCameraRecoilRecoveryComponent> BridgedRecoilRecovery;
+	bool bInventoryBridgeInitializing = false;
 };
