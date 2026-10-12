@@ -7,6 +7,8 @@
 #include"WeaponRecoilData.h"
 #include "WeaponRuntime.generated.h"
 
+class UWeaponDefinitionData;
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnFireCommitted);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnReloadStarted);
 USTRUCT(BlueprintType)
@@ -36,6 +38,16 @@ class DUST2_API AWeaponRuntime : public AActor
 	GENERATED_BODY()
 public:
 	AWeaponRuntime();
+	virtual void OnConstruction(const FTransform& Transform) override;
+	virtual void PostInitializeComponents() override;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "武器配置", meta = (DisplayName = "枪械玩法配置", ToolTip = "绑定后玩法数值从此资产读取；未绑定时保留旧蓝图参数。"))
+	TObjectPtr<UWeaponDefinitionData> WeaponDefinition;
+	UFUNCTION(BlueprintCallable, Category = "武器配置", meta = (DisplayName = "应用枪械配置（保留当前弹药）", ToolTip = "刷新静态配置，不补满弹药，不覆盖当前开火模式。"))
+	void ApplyDefinitionSettings();
+	UFUNCTION(BlueprintCallable, Category = "武器配置", meta = (DisplayName = "复制现有数值到配置", ToolTip = "迁移用：复制当前蓝图默认值，不引用候选调参文本。"))
+	void CaptureDefinition(UWeaponDefinitionData* Destination) const;
+	UFUNCTION(BlueprintPure, Category = "武器配置", meta = (DisplayName = "获取当前连续射击散布", ToolTip = "返回额外散布角度，停火时按配置恢复。"))
+	float GetCurrentFiringSpread() const;
 	UFUNCTION(BlueprintPure, Category = "Weapon")
 	EFireMode GetFireMode() const;
 	UFUNCTION(BlueprintCallable, Category = "Weapon")
@@ -97,38 +109,38 @@ public:
 		bool bInitialDrawConsumed) const;
 
 protected:
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon", meta = (EditCondition = "WeaponDefinition == nullptr"))
 	EFireMode CurrentFireMode = EFireMode::SemiAutomatic;
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon", meta = (EditCondition = "WeaponDefinition == nullptr"))
 	TArray<EFireMode> AllowedFireModes;
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ammo")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ammo", meta = (EditCondition = "WeaponDefinition == nullptr"))
 	int32 CurrentAmmo;
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ammo")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ammo", meta = (EditCondition = "WeaponDefinition == nullptr"))
 	int32 MagazineCapacity;
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ammo")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ammo", meta = (EditCondition = "WeaponDefinition == nullptr"))
 	int32 ReserveAmmo;
 	UPROPERTY(Transient, VisibleInstanceOnly, BlueprintReadOnly, Category = "Reload")
 	bool bIsReloading;
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fire")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fire", meta = (EditCondition = "WeaponDefinition == nullptr"))
 	float FireInterval;
 	UPROPERTY(Transient, VisibleInstanceOnly, BlueprintReadOnly, Category = "Fire")
 	float NextFireTime;
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fire",
 		meta = (ClampMin = "0.0"))
 	float BurstShotInterval;
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Recoil")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Recoil", meta = (EditCondition = "WeaponDefinition == nullptr"))
 	TObjectPtr<UWeaponRecoilData>RecoilData;
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Spread")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Spread", meta = (EditCondition = "WeaponDefinition == nullptr"))
 	float StationarySpreadAngle;
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Spread")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Spread", meta = (EditCondition = "WeaponDefinition == nullptr"))
 	float MovementSpreadSpeedThreshold;
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Spread")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Spread", meta = (EditCondition = "WeaponDefinition == nullptr"))
 	float MovingSpreadAngle;
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Spread")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Spread", meta = (EditCondition = "WeaponDefinition == nullptr"))
 	float JumpSpreadAngle;
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Spread")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Spread", meta = (EditCondition = "WeaponDefinition == nullptr"))
 	float SlowWalkSpreadAngle;
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Reload")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Reload", meta = (EditCondition = "WeaponDefinition == nullptr"))
 	bool bLockReloadAmountAtStart = false;
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Reload",
 		meta = (DisplayName = "逐颗装入弹药"))
@@ -148,6 +160,14 @@ protected:
 
 private:
 	void CacheCommittedRecoil(float SuccessfulShotTime);
+	void CacheCommittedFiringSpread(float SuccessfulShotTime);
+	float AccumulatedFiringSpread = 0.0f;
+	float CommittedFiringSpread = 0.0f;
+	float LastSpreadShotTime = 0.0f;
+	bool bHasSpreadShot = false;
+	bool bRestoredAmmo = false;
+	bool bRestoredFireMode = false;
+	bool bInitialDefinitionApplied = false;
 	void AdvanceRecoilPatternIndex(int32 PatternSize);
 	void ClearPendingRecoilKick();
 
