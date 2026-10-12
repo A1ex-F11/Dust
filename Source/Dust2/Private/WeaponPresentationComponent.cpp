@@ -34,6 +34,7 @@ void UWeaponPresentationComponent::SetWeaponForPresentation(
 	CancelReloadWeaponPresentation();
 	if (AWeaponRuntime* OldWeapon = BoundWeapon.Get())
 	{
+		OldWeapon->ResetRecoilPattern();
 		OldWeapon->OnFireCommitted.RemoveDynamic(
 			this,
 			&UWeaponPresentationComponent::HandleFireCommitted);
@@ -46,6 +47,7 @@ void UWeaponPresentationComponent::SetWeaponForPresentation(
 	BoundWeapon = NewWeapon;
 	if (NewWeapon)
 	{
+		NewWeapon->ResetRecoilPattern();
 		NewWeapon->OnFireCommitted.AddUniqueDynamic(
 			this,
 			&UWeaponPresentationComponent::HandleFireCommitted);

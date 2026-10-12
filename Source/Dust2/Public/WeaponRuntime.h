@@ -75,6 +75,8 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Fire")
 	FOnFireCommitted OnFireCommitted;
 	UFUNCTION(BlueprintCallable, Category = "Recoil")
+	void ResetRecoilPattern();
+	UFUNCTION(BlueprintCallable, Category = "Recoil")
 	void GenerateRecoilKick(float& PitchKick, float& YawKick, bool& bGenerated);
 	UFUNCTION(BlueprintCallable, Category = "Spread")
 	void GenerateShotDirection(
@@ -143,4 +145,19 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Display",
 		meta = (DisplayName = "武器展示名"))
 	FText WeaponDisplayName;
+
+private:
+	void CacheCommittedRecoil(float SuccessfulShotTime);
+	void AdvanceRecoilPatternIndex(int32 PatternSize);
+	void ClearPendingRecoilKick();
+
+	int32 RecoilPatternIndex = 0;
+	float LastSuccessfulShotTime = 0.0f;
+	bool bHasSuccessfulShotTime = false;
+	float CachedRecoilPitchKick = 0.0f;
+	float CachedRecoilYawKick = 0.0f;
+	bool bHasPendingRecoilKick = false;
+	FVector2D AccumulatedShotRecoil = FVector2D::ZeroVector;
+	FVector2D CommittedShotRecoil = FVector2D::ZeroVector;
+	bool bHasCommittedShotDirection = false;
 };

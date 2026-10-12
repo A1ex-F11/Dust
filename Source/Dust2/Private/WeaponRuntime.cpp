@@ -1,5 +1,6 @@
 
 #include "WeaponRuntime.h"
+#include "ShotRecoilMath.h"
 #include "Engine/World.h"
 
 AWeaponRuntime::AWeaponRuntime()
@@ -75,6 +76,7 @@ bool AWeaponRuntime::ReloadAmmo()
 }
 void AWeaponRuntime::RestoreAmmo(int32 NewCurrentAmmo, int32 NewReserveAmmo)
 {
+	ResetRecoilPattern();
 	if (bReloadOneRoundAtATime && bIsReloading)
 	{
 		CancelReload();
@@ -85,6 +87,8 @@ void AWeaponRuntime::RestoreAmmo(int32 NewCurrentAmmo, int32 NewReserveAmmo)
 }
 bool AWeaponRuntime::TryCommitFire()
 {
+	ClearPendingRecoilKick();
+	bHasCommittedShotDirection = false;
 	if (bIsReloading)
 	{
 		return false;
@@ -104,6 +108,7 @@ bool AWeaponRuntime::TryCommitFire()
 	{
 		return false;
 	}
+	CacheCommittedRecoil(CurrentTime);
 	NextFireTime = CurrentTime + GetEffectiveFireInterval();
 	OnFireCommitted.Broadcast();
 	return true;
@@ -124,10 +129,114 @@ void AWeaponRuntime::GenerateRecoilKick(
 	PitchKick = 0.0f;
 	YawKick = 0.0f;
 	bGenerated = false;
+	if (!bHasPendingRecoilKick)
+	{
+		return;
+	}
+
+	const float CommittedPitchKick = CachedRecoilPitchKick;
+	const float CommittedYawKick = CachedRecoilYawKick;
+	ClearPendingRecoilKick();
+	if (!FMath::IsFinite(CommittedPitchKick) ||
+		!FMath::IsFinite(CommittedYawKick))
+	{
+		return;
+	}
+
+	PitchKick = CommittedPitchKick;
+	YawKick = CommittedYawKick;
+	bGenerated = true;
+}
+
+void AWeaponRuntime::ResetRecoilPattern()
+{
+	AccumulatedShotRecoil = FVector2D::ZeroVector;
+	CommittedShotRecoil = FVector2D::ZeroVector;
+	bHasCommittedShotDirection = false;
+	RecoilPatternIndex = 0;
+	LastSuccessfulShotTime = 0.0f;
+	bHasSuccessfulShotTime = false;
+	ClearPendingRecoilKick();
+}
+
+void AWeaponRuntime::CacheCommittedRecoil(float SuccessfulShotTime)
+{
+	const bool bUseFixedPattern = RecoilData && RecoilData->bUseFixedPattern;
+	const bool bIndependent = bUseFixedPattern && RecoilData->bUseIndependentShotRecoil;
+	if (bUseFixedPattern && bHasSuccessfulShotTime)
+	{
+		const float ResetDelay = FMath::IsFinite(RecoilData->PatternResetDelay)
+			? FMath::Max(0.0f, RecoilData->PatternResetDelay)
+			: 0.0f;
+		const float TimeSinceLastShot = SuccessfulShotTime - LastSuccessfulShotTime;
+		if (FMath::IsFinite(TimeSinceLastShot) &&
+			TimeSinceLastShot >= ResetDelay)
+		{
+			RecoilPatternIndex = 0;
+			AccumulatedShotRecoil = FVector2D::ZeroVector;
+		}
+		else if (bIndependent)
+		{
+			const float Delay = FMath::IsFinite(RecoilData->RecoveryDelay) ? FMath::Max(0.0f, RecoilData->RecoveryDelay) : 0.0f;
+			const float Speed = FMath::IsFinite(RecoilData->ShotRecoilRecoverySpeed) ? FMath::Max(0.0f, RecoilData->ShotRecoilRecoverySpeed) : 0.0f;
+			AccumulatedShotRecoil = FShotRecoilMath::Recover(AccumulatedShotRecoil, TimeSinceLastShot, Delay, Speed);
+		}
+	}
+	if (!bIndependent) AccumulatedShotRecoil = FVector2D::ZeroVector;
+	// This shot uses the prior total. Its impulse affects the following accepted shot.
+	CommittedShotRecoil = bIndependent ? AccumulatedShotRecoil : FVector2D::ZeroVector;
+	bHasCommittedShotDirection = true;
+
+	LastSuccessfulShotTime = SuccessfulShotTime;
+	bHasSuccessfulShotTime = true;
+
 	if (!RecoilData)
 	{
 		return;
 	}
+
+	if (RecoilData->bUseFixedPattern)
+	{
+		const int32 PatternSize = RecoilData->FixedPattern.Num();
+		if (PatternSize <= 0)
+		{
+			RecoilPatternIndex = 0;
+			return;
+		}
+
+		RecoilPatternIndex = FMath::Clamp(RecoilPatternIndex, 0, PatternSize - 1);
+		const FVector2D& PatternKick = RecoilData->FixedPattern[RecoilPatternIndex];
+		if (FMath::IsFinite(PatternKick.X) && FMath::IsFinite(PatternKick.Y))
+		{
+			const float PitchScale = FMath::IsFinite(RecoilData->FixedPatternPitchScale)
+				? FMath::Max(0.0f, RecoilData->FixedPatternPitchScale) : 0.0f;
+			const float YawScale = FMath::IsFinite(RecoilData->FixedPatternYawScale)
+				? FMath::Max(0.0f, RecoilData->FixedPatternYawScale) : 0.0f;
+			const float ScaledPitch = FMath::Max(0.0f, PatternKick.X) * PitchScale;
+			const float ScaledYaw = PatternKick.Y * YawScale;
+			if (FMath::IsFinite(ScaledPitch) && FMath::IsFinite(ScaledYaw))
+			{
+				CachedRecoilPitchKick = ScaledPitch;
+				CachedRecoilYawKick = ScaledYaw;
+				bHasPendingRecoilKick = true;
+				if (bIndependent)
+				{
+					AccumulatedShotRecoil.X = FMath::Clamp(AccumulatedShotRecoil.X + ScaledPitch, 0.0, 60.0);
+					AccumulatedShotRecoil.Y = FMath::Clamp(AccumulatedShotRecoil.Y + ScaledYaw, -60.0, 60.0);
+				}
+			}
+		}
+		AdvanceRecoilPatternIndex(PatternSize);
+		return;
+	}
+
+	if (!FMath::IsFinite(RecoilData->VerticalKickMin) ||
+		!FMath::IsFinite(RecoilData->VerticalKickMax) ||
+		!FMath::IsFinite(RecoilData->HorizontalKickMax))
+	{
+		return;
+	}
+
 	const float RawVerticalMin = FMath::Min(
 		RecoilData->VerticalKickMin,
 		RecoilData->VerticalKickMax);
@@ -137,9 +246,50 @@ void AWeaponRuntime::GenerateRecoilKick(
 	const float VerticalMin = FMath::Max(0.0f, RawVerticalMin);
 	const float VerticalMax = FMath::Max(VerticalMin, RawVerticalMax);
 	const float HorizontalMax = FMath::Abs(RecoilData->HorizontalKickMax);
-	PitchKick = FMath::FRandRange(VerticalMin, VerticalMax);
-	YawKick = FMath::FRandRange(-HorizontalMax, HorizontalMax);
-	bGenerated = true;
+	const float PitchKick = FMath::FRandRange(VerticalMin, VerticalMax);
+	const float YawKick = FMath::FRandRange(-HorizontalMax, HorizontalMax);
+	if (!FMath::IsFinite(PitchKick) || !FMath::IsFinite(YawKick))
+	{
+		return;
+	}
+
+	CachedRecoilPitchKick = PitchKick;
+	CachedRecoilYawKick = YawKick;
+	bHasPendingRecoilKick = true;
+}
+
+void AWeaponRuntime::AdvanceRecoilPatternIndex(int32 PatternSize)
+{
+	if (PatternSize <= 0)
+	{
+		RecoilPatternIndex = 0;
+		return;
+	}
+
+	const int32 NextIndex = RecoilPatternIndex + 1;
+	if (NextIndex < PatternSize)
+	{
+		RecoilPatternIndex = NextIndex;
+		return;
+	}
+
+	if (!RecoilData || RecoilData->LoopStartIndex < 0)
+	{
+		RecoilPatternIndex = PatternSize - 1;
+		return;
+	}
+
+	RecoilPatternIndex = FMath::Clamp(
+		RecoilData->LoopStartIndex,
+		0,
+		PatternSize - 1);
+}
+
+void AWeaponRuntime::ClearPendingRecoilKick()
+{
+	CachedRecoilPitchKick = 0.0f;
+	CachedRecoilYawKick = 0.0f;
+	bHasPendingRecoilKick = false;
 }
 void AWeaponRuntime::GenerateShotDirection(
 	const FVector& TraceDirection,
@@ -153,12 +303,18 @@ void AWeaponRuntime::GenerateShotDirection(
 {
 	ShotDirection = FVector::ZeroVector;
 	bGenerated = false;
-	const FVector BaseDirection = TraceDirection.GetSafeNormal();
+	FVector BaseDirection = TraceDirection.GetSafeNormal();
 	if (BaseDirection.IsNearlyZero())
 	{
 		return;
 	}
 	const float SafeCurrentHorizontalSpeed = FMath::Max(0.0f, CurrentHorizontalSpeed);
+	if (RecoilData && RecoilData->bUseFixedPattern && RecoilData->bUseIndependentShotRecoil)
+	{
+		if (!bHasCommittedShotDirection) return;
+		BaseDirection = FShotRecoilMath::Apply(BaseDirection, CommittedShotRecoil);
+		if (BaseDirection.IsNearlyZero()) return;
+	}
 	const float SafeMovementSpreadSpeedThreshold = FMath::Max(0.0f, MovementSpreadSpeedThreshold);
 	float SelectedSpreadAngle = MovingSpreadAngle;
 	if (bIsFalling)
@@ -223,6 +379,7 @@ bool AWeaponRuntime::TryStartReload()
 		: ReloadRequestId + 1;
 
 	bIsReloading = true;
+	ResetRecoilPattern();
 	OnReloadStarted.Broadcast();
 	return true;
 }
