@@ -12,6 +12,9 @@ class DUST2_API UWeaponRecoilData : public UDataAsset
 	GENERATED_BODY()
 public:
 	UWeaponRecoilData();
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "右键瞄准后坐",
+		meta = (DisplayName = "右键后坐强度倍率", ClampMin = "0.0", ToolTip = "复用当前后坐序列，缩放右键时的瞄准视线冲量；1保持序列强度，0关闭。腰射和射速不变。"))
+	float AimingRecoilScale = 1.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "固定后坐轨迹",
 		meta = (DisplayName = "使用固定后坐序列", ToolTip = "开启后按数组逐发采样；关闭后使用随机上抬和左右范围。"))
 	bool bUseFixedPattern;
@@ -63,5 +66,6 @@ public:
 	float VerticalKickMax;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "随机后坐", meta=(DisplayName="随机左右最大值", ToolTip="关闭固定序列时，每发左右摆动的最大角度。"))
 	float HorizontalKickMax;
-
+	
 };
+

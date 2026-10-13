@@ -466,6 +466,10 @@ void ADust2PlayerCharacter::SetNativeAimState(bool bAiming)
         return;
     }
     bNativeAiming = bAiming;
+    if (IsValid(BridgedRecoilRecovery))
+    {
+        BridgedRecoilRecovery->SetAimingRecoilMode(bAiming);
+    }
     if (AWeaponRuntime* Weapon = ObservedAimWeapon.Get())
     {
         Weapon->SetOwnerAimState(bAiming);

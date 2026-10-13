@@ -7,6 +7,10 @@
 #include "WeaponInventoryComponent.h"
 #include "WeaponPresentationComponent.h"
 #include "CameraRecoilRecoveryComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "Camera/CameraComponent.h"
+#include "Engine/LocalPlayer.h"
+#include "EngineGlobals.h"
 #include "UObject/UnrealType.h"
 
 namespace
@@ -425,6 +429,113 @@ bool FAimedViewDirectionTest::RunTest(const FString& Parameters)
     const float ConeCos = FMath::Cos(FMath::DegreesToRadians(1.01f));
     for (int32 Sample = 0; Sample < 32; ++Sample)
         TestTrue(TEXT("ADS spread stays around view rather than hidden recoil"), FVector::DotProduct(Generate(), ViewDirection) >= ConeCos);
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAimedRecoilWriterTest, "Dust2.Aim.Recoil.ViewWriterAndMultiplier",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FAimedRecoilWriterTest::RunTest(const FString& Parameters)
+{
+    AddExpectedMessage(TEXT("Inventory mirror sync rejected"), ELogVerbosity::Warning,
+        EAutomationExpectedMessageFlags::Contains, 0);
+    FAimTestWorld F;
+    if (!TestTrue(TEXT("fixture ready"), F.bReady)) return false;
+    APlayerController* PC = F.World->SpawnActor<APlayerController>();
+    PC->Player = NewObject<ULocalPlayer>(GEngine);
+    PC->Possess(F.Player);
+    PC->SetControlRotation(FRotator::ZeroRotator);
+    UCameraRecoilRecoveryComponent* Recovery = F.Player->FindComponentByClass<UCameraRecoilRecoveryComponent>();
+    UCameraComponent* Camera = NewObject<UCameraComponent>(F.Player);
+    Camera->RegisterComponent();
+    Camera->bUsePawnControlRotation = true;
+    UWeaponDefinitionData* D = ConfigureDualSpread(F);
+    D->RecoilData = NewObject<UWeaponRecoilData>(D);
+    UWeaponRecoilData* R = D->RecoilData;
+    R->bUseFixedPattern = R->bUseIndependentShotRecoil = true;
+    R->FixedPattern = { FVector2D(2.0f, 1.0f) };
+    R->FixedPatternPitchScale = R->FixedPatternYawScale = 1.0f;
+    R->AimingRecoilScale = 0.5f;
+    R->SmoothKickDuration = 0.0f;
+    R->ImmediateKickFraction = 1.0f;
+    R->RecoveryDelay = R->PatternResetDelay = 100.0f;
+    F.Weapon1->ApplyDefinitionSettings();
+    const float Interval = F.Weapon1->GetEffectiveFireInterval();
+    TestTrue(TEXT("aim entered"), F.Press());
+    for (int32 Shot = 0; Shot < 2; ++Shot)
+    {
+        F.World->Tick(LEVELTICK_All, 0.02f);
+        const FVector Before = PC->GetControlRotation().Vector();
+        TestTrue(TEXT("accepted shot"), F.Weapon1->TryCommitFire());
+        FVector Actual; bool bGenerated = false;
+        F.Weapon1->GenerateShotDirection(Before, 0.0f, false, false, false, Actual, bGenerated);
+        TestTrue(TEXT("this shot follows pre-feedback view without double recoil"), bGenerated && Actual.Equals(Before, 0.00001f));
+        float Pitch = 0.0f, Yaw = 0.0f; bool bKick = false;
+        F.Weapon1->GenerateRecoilKick(Pitch, Yaw, bKick);
+        TestTrue(TEXT("existing trajectory provides kick"), bKick);
+        Recovery->ApplyRecoilWithCamera(Pitch, Yaw, R, Camera);
+        TestTrue(TEXT("view pitch uses separate aim multiplier"), FMath::IsNearlyEqual(PC->GetControlRotation().Pitch, float(Shot + 1)));
+        TestTrue(TEXT("view yaw uses same trajectory multiplier"), FMath::IsNearlyEqual(PC->GetControlRotation().Yaw, float(Shot + 1) * 0.5f));
+        FMinimalViewInfo POV;
+        Camera->GetCameraView(0.0f, POV);
+        TestTrue(TEXT("controlled camera follows the same view"), POV.Rotation.Equals(PC->GetControlRotation(), 0.0001f));
+    }
+    TestEqual(TEXT("ADS does not change fire interval"), F.Weapon1->GetEffectiveFireInterval(), Interval);
+    R->AimingRecoilScale = 0.0f;
+    const FRotator BeforeZero = PC->GetControlRotation();
+    Recovery->ApplyRecoilWithCamera(2.0f, 1.0f, R, Camera);
+    TestTrue(TEXT("zero scale produces no view kick"), PC->GetControlRotation().Equals(BeforeZero));
+    F.Release();
+    R->AimingRecoilScale = 10.0f;
+    Recovery->ApplyRecoilWithCamera(2.0f, 1.0f, R, Camera);
+    TestTrue(TEXT("hip independent feedback does not write control rotation"), PC->GetControlRotation().Equals(BeforeZero));
+    Recovery->ClearRecoil();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAimedRecoilCleanupTest, "Dust2.Aim.Recoil.TailCleanupAndRecovery",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FAimedRecoilCleanupTest::RunTest(const FString& Parameters)
+{
+    AddExpectedMessage(TEXT("Inventory mirror sync rejected"), ELogVerbosity::Warning,
+        EAutomationExpectedMessageFlags::Contains, 0);
+    TGuardValue<uint64> FrameGuard(GFrameCounter, GFrameCounter);
+    FAimTestWorld F;
+    if (!TestTrue(TEXT("fixture ready"), F.bReady)) return false;
+    APlayerController* PC = F.World->SpawnActor<APlayerController>();
+    PC->Player = NewObject<ULocalPlayer>(GEngine);
+    PC->Possess(F.Player);
+    PC->SetControlRotation(FRotator::ZeroRotator);
+    UCameraRecoilRecoveryComponent* Recovery = F.Player->FindComponentByClass<UCameraRecoilRecoveryComponent>();
+    UWeaponRecoilData* R = NewObject<UWeaponRecoilData>();
+    R->bUseFixedPattern = R->bUseIndependentShotRecoil = true;
+    R->AimingRecoilScale = 1.0f;
+    R->SmoothKickDuration = 1.0f;
+    R->ImmediateKickFraction = 0.25f;
+    R->RecoveryDelay = 100.0f;
+    F.Press();
+    Recovery->ApplyRecoilWithCamera(4.0f, 0.0f, R, nullptr);
+    TestTrue(TEXT("only immediate fraction applied"), FMath::IsNearlyEqual(PC->GetControlRotation().Pitch, 1.0f));
+    F.Release();
+    for (int32 Frame = 0; Frame < 25; ++Frame) { ++GFrameCounter; F.World->Tick(LEVELTICK_All, 0.05f); }
+    TestTrue(TEXT("release cancels ADS tail without snapping view"), FMath::IsNearlyEqual(PC->GetControlRotation().Pitch, 1.0f));
+    PC->SetControlRotation(FRotator::ZeroRotator);
+    R->SmoothKickDuration = 0.0f;
+    R->ImmediateKickFraction = 1.0f;
+    R->RecoveryDelay = 0.1f;
+    R->ShotRecoilRecoverySpeed = 100.0f;
+    R->RecoveryPitchRatio = 1.0f;
+    F.Press();
+    Recovery->ApplyRecoilWithCamera(2.0f, 0.0f, R, nullptr);
+    TestTrue(TEXT("full kick changes view"), FMath::IsNearlyEqual(PC->GetControlRotation().Pitch, 2.0f));
+    for (int32 Frame = 0; Frame < 8; ++Frame) { ++GFrameCounter; F.World->Tick(LEVELTICK_All, 0.05f); }
+    TestTrue(FString::Printf(TEXT("ADS view recovers after configured delay; actual=%f time=%f"), PC->GetControlRotation().Pitch, F.World->GetTimeSeconds()), FMath::IsNearlyZero(PC->GetControlRotation().Pitch, 0.001f));
+    R->RecoveryDelay = 100.0f;
+    Recovery->ApplyRecoilWithCamera(2.0f, 0.0f, R, nullptr);
+    Recovery->NotifyManualLook();
+    const FRotator ManualView(-3.0f, 5.0f, 0.0f);
+    PC->SetControlRotation(ManualView);
+    for (int32 Frame = 0; Frame < 8; ++Frame) { ++GFrameCounter; F.World->Tick(LEVELTICK_All, 0.05f); }
+    TestTrue(TEXT("manual compensation is not undone by old recovery"), PC->GetControlRotation().Equals(ManualView, 0.001f));
+    F.Player->CancelAim();
     return true;
 }
 #endif

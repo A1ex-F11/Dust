@@ -2,6 +2,7 @@
 #include "WeaponRecoilData.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/Controller.h"
 #include "Camera/CameraComponent.h"
 
 namespace
@@ -113,8 +114,19 @@ void UCameraRecoilRecoveryComponent::ApplyDelta(const FVector2D& Delta, bool bRe
     {
         return;
     }
-    PawnOwner->AddControllerPitchInput(-Delta.X);
-    PawnOwner->AddControllerYawInput(Delta.Y);
+    if (bAimingRecoilMode)
+    {
+        // ADS recoil changes the same view sampled by the next shot, exactly once.
+        FRotator View = PawnOwner->GetController()->GetControlRotation();
+        View.Pitch = FMath::ClampAngle(View.Pitch + Delta.X, -89.0f, 89.0f);
+        View.Yaw += Delta.Y;
+        PawnOwner->GetController()->SetControlRotation(View);
+    }
+    else
+    {
+        PawnOwner->AddControllerPitchInput(-Delta.X);
+        PawnOwner->AddControllerYawInput(Delta.Y);
+    }
     if (bRecoverable)
     {
         AccumulatedPitch += Delta.X;
@@ -233,7 +245,16 @@ void UCameraRecoilRecoveryComponent::RecoveryStep()
         NotifyManualLook();
         return;
     }
-    PawnOwner->AddControllerPitchInput(PitchStep);
+    if (bAimingRecoilMode)
+    {
+        FRotator View = PawnOwner->GetController()->GetControlRotation();
+        View.Pitch = FMath::ClampAngle(View.Pitch - PitchStep, -89.0f, 89.0f);
+        PawnOwner->GetController()->SetControlRotation(View);
+    }
+    else
+    {
+        PawnOwner->AddControllerPitchInput(PitchStep);
+    }
     AccumulatedPitch -= PitchStep;
     if (FMath::IsNearlyZero(AccumulatedPitch))
     {
@@ -284,6 +305,22 @@ void UCameraRecoilRecoveryComponent::ApplyRecoilWithCamera(float PitchKick, floa
     UWeaponRecoilData* RecoilSettings, UCameraComponent* RecoilCamera)
 {
     if (!IsValid(RecoilSettings)) return;
+    if (bAimingRecoilMode)
+    {
+        if (!FMath::IsFinite(PitchKick) || !FMath::IsFinite(YawKick)) return;
+        ClearIndependentVisual();
+        ActiveRecoveryDelay = SafeNonNegative(RecoilSettings->RecoveryDelay);
+        ActiveRecoverySpeed = SafeNonNegative(RecoilSettings->ShotRecoilRecoverySpeed);
+        ActiveRecoveryRatio = FMath::IsFinite(RecoilSettings->RecoveryPitchRatio)
+            ? FMath::Clamp(RecoilSettings->RecoveryPitchRatio, 0.0f, 1.0f) : 0.0f;
+        const float Scale = SafeNonNegative(RecoilSettings->AimingRecoilScale);
+        QueueKick(PitchKick * Scale, YawKick * Scale,
+            SafeNonNegative(RecoilSettings->SmoothKickDuration),
+            FMath::IsFinite(RecoilSettings->ImmediateKickFraction)
+                ? FMath::Clamp(RecoilSettings->ImmediateKickFraction, 0.0f, 1.0f) : 1.0f,
+            false);
+        return;
+    }
     if (!RecoilSettings->bUseFixedPattern || !RecoilSettings->bUseIndependentShotRecoil)
     {
         ApplyRecoilKickWithData(PitchKick, YawKick, RecoilSettings);
@@ -335,3 +372,12 @@ void UCameraRecoilRecoveryComponent::ClearIndependentVisual()
     AppliedVisualTransform = FTransform::Identity;
     bIndependentVisualMode = false;
 }
+
+void UCameraRecoilRecoveryComponent::SetAimingRecoilMode(bool bAiming)
+{
+    if (bAimingRecoilMode == bAiming) return;
+    // Keep the player's current orientation but stop all tails from the previous mode.
+    ClearRecoil();
+    bAimingRecoilMode = bAiming;
+}
+

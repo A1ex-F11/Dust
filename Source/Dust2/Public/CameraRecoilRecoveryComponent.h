@@ -48,6 +48,10 @@ protected:
     float RecoveryInterval;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 private:
+    friend class ADust2PlayerCharacter;
+    // Native player aim authority chooses the writer; Blueprints cannot set a second aim state.
+    void SetAimingRecoilMode(bool bAiming);
+    bool bAimingRecoilMode = false;
     bool bIndependentVisualMode = false;
     TWeakObjectPtr<UCameraComponent> VisualCamera;
     FVector2D VisualOffset = FVector2D::ZeroVector;
