@@ -495,7 +495,10 @@ void ADust2PlayerCharacter::ObserveAimWeapon(AWeaponRuntime* Weapon)
 
 void ADust2PlayerCharacter::HandleAimReloadStarted()
 {
-    CancelAim();
+    if (!bKeepAimDuringReload)
+    {
+        CancelAim();
+    }
 }
 
 void ADust2PlayerCharacter::HandleAimWeaponDestroyed(AActor* DestroyedActor)

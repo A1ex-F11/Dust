@@ -120,6 +120,10 @@ bool FAimReloadTest::RunTest(const FString& Parameters)
         EAutomationExpectedMessageFlags::Contains, 0);
     FAimTestWorld F;
     if (!TestTrue(TEXT("fixture ready"), F.bReady)) return false;
+    // Keep the previous explicit cancel-on-reload policy covered as well.
+    if (FBoolProperty* Policy = FindFProperty<FBoolProperty>(
+        F.Player->GetClass(), TEXT("bKeepAimDuringReload")))
+        Policy->SetPropertyValue_InContainer(F.Player, false);
     SetAimTestInt(F.Weapon1, TEXT("MagazineCapacity"), 10);
     SetAimTestInt(F.Weapon1, TEXT("CurrentAmmo"), 10);
     SetAimTestInt(F.Weapon1, TEXT("ReserveAmmo"), 20);
@@ -174,6 +178,38 @@ bool FAimLifecycleTest::RunTest(const FString& Parameters)
     TestFalse(TEXT("destroyed weapon clears aim"), F.Player->IsAiming());
     F.Release();
     TestFalse(TEXT("missing weapon cannot aim"), F.Press());
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAimKeepReloadTest, "Dust2.Aim.KeepAimDuringReload",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FAimKeepReloadTest::RunTest(const FString& Parameters)
+{
+    AddExpectedMessage(TEXT("Inventory mirror sync rejected"), ELogVerbosity::Warning,
+        EAutomationExpectedMessageFlags::Contains, 0);
+    FAimTestWorld F;
+    if (!TestTrue(TEXT("fixture ready"), F.bReady)) return false;
+    SetAimTestInt(F.Weapon1, TEXT("MagazineCapacity"), 10);
+    SetAimTestInt(F.Weapon1, TEXT("CurrentAmmo"), 4);
+    SetAimTestInt(F.Weapon1, TEXT("ReserveAmmo"), 20);
+    TestTrue(TEXT("aim before reload"), F.Press());
+    TestTrue(TEXT("reload accepted while aimed"), F.Weapon1->TryStartReload());
+    TestTrue(TEXT("A policy retains aim during reload"), F.Player->IsAiming());
+    TestTrue(TEXT("formal reload transaction remains active"), F.Weapon1->IsReloading());
+    TestEqual(TEXT("starting reload does not grant ammo early"), F.Weapon1->GetCurrentAmmo(), 4);
+    TestTrue(TEXT("finish reload through original authority"), F.Weapon1->FinishReload());
+    TestTrue(TEXT("A policy stays aimed without another press"), F.Player->IsAiming());
+    TestEqual(TEXT("original ammo commit retained"), F.Weapon1->GetCurrentAmmo(), 10);
+    SetAimTestInt(F.Weapon1, TEXT("CurrentAmmo"), 4);
+    TestTrue(TEXT("second aimed reload accepted"), F.Weapon1->TryStartReload());
+    F.Release();
+    TestFalse(TEXT("release during reload exits aim"), F.Player->IsAiming());
+    TestFalse(TEXT("a new aim during reload remains rejected"), F.Press());
+    F.Weapon1->FinishReload();
+    TestFalse(TEXT("blocked press does not auto enter at completion"), F.Press());
+    F.Release();
+    TestTrue(TEXT("repress after completion enters"), F.Press());
+    TestTrue(TEXT("switch still accepted"), F.Inventory->TrySwitchWeaponNative());
+    TestFalse(TEXT("A policy does not weaken switch cancellation"), F.Player->IsAiming());
     return true;
 }
 #endif

@@ -36,6 +36,10 @@ public:
 	bool IsAimInputHeld() const { return bAimInputHeld; }
 	UFUNCTION(BlueprintImplementableEvent, Category = "Weapon|Aim")
 	void ReceiveAimStateChanged(bool bAiming);
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Aim",
+		meta = (DisplayName = "换弹时保持瞄准",
+			ToolTip = "已在瞄准时开始换弹，保留瞄准视野和准星状态；松开右键仍退出。"))
+	bool bKeepAimDuringReload = true;
 	// Replace the three Blueprint inventory bindings and initialization call.
 	// Blueprint presentation handlers must be implemented before calling this.
 	UFUNCTION(BlueprintCallable, Category = "Weapon|Inventory",
