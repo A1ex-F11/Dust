@@ -10,6 +10,32 @@
 
 class UWeaponBallisticsData;
 
+USTRUCT(BlueprintType)
+struct DUST2_API FWeaponSpreadProfile
+{
+	GENERATED_BODY()
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="静止散布角度", ClampMin="0.0"))
+	float StationarySpreadAngle = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="移动散布角度", ClampMin="0.0"))
+	float MovingSpreadAngle = 1.5f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="跳跃散布角度", ClampMin="0.0"))
+	float JumpSpreadAngle = 6.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="慢走散布角度", ClampMin="0.0"))
+	float SlowWalkSpreadAngle = 0.5f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="移动散布速度阈值", ClampMin="0.0"))
+	float MovementSpreadSpeedThreshold = 10.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="启用连续射击散布"))
+	bool bUseFiringSpread = false;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="每发增加散布", ClampMin="0.0"))
+	float SpreadPerShot = 0.02f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="连续射击散布上限", ClampMin="0.0"))
+	float MaxFiringSpread = 0.3f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="连续射击散布恢复延迟", ClampMin="0.0"))
+	float SpreadRecoveryDelay = 0.15f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="连续射击散布恢复速度", ClampMin="0.0"))
+	float SpreadRecoverySpeed = 1.5f;
+};
+
 /** A single editable gameplay configuration for one weapon. */
 UCLASS(BlueprintType, meta = (DisplayName = "枪械玩法配置"))
 class DUST2_API UWeaponDefinitionData : public UDataAsset
@@ -18,6 +44,16 @@ class DUST2_API UWeaponDefinitionData : public UDataAsset
 
 public:
 	UWeaponDefinitionData();
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="枪械配置|瞄准散布",
+		meta=(DisplayName="启用独立瞄准散布", ToolTip="开启后右键使用下方配置；关闭时腰射与瞄准沿用原有散布。旧资产默认关闭，不自动覆盖原数值。"))
+	bool bUseAimingSpread = false;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="枪械配置|瞄准散布",
+		meta=(DisplayName="右键瞄准散布参数", EditCondition="bUseAimingSpread"))
+	FWeaponSpreadProfile AimingSpread;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="枪械配置|瞄准散布",
+		meta=(DisplayName="瞄准弹道忽略累计后坐", EditCondition="bUseAimingSpread",
+			ToolTip="适合精确狙击：瞄准子弹不使用累计方向后坐；保留镜头/枪身反馈。普通步枪建议关闭。"))
+	bool bIgnoreShotRecoilWhenAiming = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|基础",
 		meta = (DisplayName = "武器展示名", ToolTip = "用于界面和武器展示的名称。迁移时复制原武器蓝图中的实际名称。"))
@@ -59,43 +95,43 @@ public:
 		meta = (DisplayName = "伤害与弹道参数", ToolTip = "展开后可在此编辑单发伤害、护甲穿透、爆头倍率和射线距离；迁移时复制原弹道资产的实际值。"))
 	TObjectPtr<UWeaponBallisticsData> BallisticsData;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|散布",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射散布",
 		meta = (DisplayName = "静止散布角度", ClampMin = "0.0", ToolTip = "水平速度低于阈值时使用的基础散布角度；保留旧逻辑的蹲姿分支也使用此值，单位为度。"))
 	float StationarySpreadAngle = 0.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|散布",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射散布",
 		meta = (DisplayName = "移动散布角度", ClampMin = "0.0", ToolTip = "普通移动时使用的基础散布角度，单位为度。"))
 	float MovingSpreadAngle = 3.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|散布",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射散布",
 		meta = (DisplayName = "跳跃散布角度", ClampMin = "0.0", ToolTip = "角色处于空中时使用的基础散布角度，单位为度。"))
 	float JumpSpreadAngle = 12.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|散布",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射散布",
 		meta = (DisplayName = "慢走散布角度", ClampMin = "0.0", ToolTip = "角色处于慢走状态时使用的基础散布角度，单位为度。"))
 	float SlowWalkSpreadAngle = 1.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|散布",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射散布",
 		meta = (DisplayName = "移动散布速度阈值", ClampMin = "0.0", ToolTip = "水平速度不超过该值时按静止散布处理，单位与角色移动速度一致。"))
 	float MovementSpreadSpeedThreshold = 10.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|连续射击散布",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射连续射击散布",
 		meta = (DisplayName = "启用连续射击散布", ToolTip = "开启后，连续成功射击会逐发增加散布，停火后按恢复参数逐渐收回。"))
 	bool bUseFiringSpread = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|连续射击散布",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射连续射击散布",
 		meta = (DisplayName = "每发增加散布", ClampMin = "0.0", ToolTip = "每次成功射击后增加的散布角度，单位为度。"))
 	float SpreadPerShot = 0.15f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|连续射击散布",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射连续射击散布",
 		meta = (DisplayName = "连续射击散布上限", ClampMin = "0.0", ToolTip = "连续射击额外增加的散布最大值，单位为度。"))
 	float MaxFiringSpread = 0.8f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|连续射击散布",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射连续射击散布",
 		meta = (DisplayName = "连续射击散布恢复延迟", ClampMin = "0.0", ToolTip = "停火后等待多久开始恢复连续射击散布，单位为秒。"))
 	float SpreadRecoveryDelay = 0.2f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|连续射击散布",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射连续射击散布",
 		meta = (DisplayName = "连续射击散布恢复速度", ClampMin = "0.0", ToolTip = "延迟结束后每秒减少的散布角度，单位为度/秒。"))
 	float SpreadRecoverySpeed = 2.0f;
 

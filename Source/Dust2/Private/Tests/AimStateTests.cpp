@@ -215,4 +215,161 @@ bool FAimKeepReloadTest::RunTest(const FString& Parameters)
     TestFalse(TEXT("A policy does not weaken switch cancellation"), F.Player->IsAiming());
     return true;
 }
+namespace
+{
+    UWeaponDefinitionData* ConfigureDualSpread(FAimTestWorld& F)
+    {
+        UWeaponDefinitionData* D = NewObject<UWeaponDefinitionData>(F.Weapon1);
+        D->FireInterval = 0.01f;
+        D->RecoilData = nullptr;
+        D->bUseAimingSpread = true;
+        D->StationarySpreadAngle = D->MovingSpreadAngle =
+            D->JumpSpreadAngle = D->SlowWalkSpreadAngle = 6.0f;
+        D->AimingSpread.StationarySpreadAngle = D->AimingSpread.MovingSpreadAngle =
+            D->AimingSpread.JumpSpreadAngle = D->AimingSpread.SlowWalkSpreadAngle = 0.0f;
+        F.Weapon1->WeaponDefinition = D;
+        F.Weapon1->ApplyDefinitionSettings();
+        return D;
+    }
+
+    bool HasSpread(AWeaponRuntime* Weapon, float Speed = 0.0f, bool bFalling = false)
+    {
+        bool bVaried = false;
+        for (int32 Index = 0; Index < 32; ++Index)
+        {
+            FVector Direction;
+            bool bGenerated = false;
+            Weapon->GenerateShotDirection(FVector::ForwardVector, Speed,
+                bFalling, false, false, Direction, bGenerated);
+            if (!bGenerated) return false;
+            bVaried |= !Direction.Equals(FVector::ForwardVector, 0.00001f);
+        }
+        return bVaried;
+    }
+
+    bool AllDirectionsExact(AWeaponRuntime* Weapon, float Speed = 0.0f, bool bFalling = false)
+    {
+        for (int32 Index = 0; Index < 32; ++Index)
+        {
+            FVector Direction;
+            bool bGenerated = false;
+            Weapon->GenerateShotDirection(FVector::ForwardVector, Speed,
+                bFalling, false, false, Direction, bGenerated);
+            if (!bGenerated || !Direction.Equals(FVector::ForwardVector, 0.00001f)) return false;
+        }
+        return true;
+    }
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDualSpreadSnapshotTest, "Dust2.Aim.DualSpread.ShotSnapshotAndFallback",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FDualSpreadSnapshotTest::RunTest(const FString& Parameters)
+{
+    AddExpectedMessage(TEXT("Inventory mirror sync rejected"), ELogVerbosity::Warning,
+        EAutomationExpectedMessageFlags::Contains, 0);
+    FAimTestWorld F;
+    if (!TestTrue(TEXT("fixture ready"), F.bReady)) return false;
+    UWeaponDefinitionData* D = ConfigureDualSpread(F);
+    TestTrue(TEXT("hip shot accepted"), F.Weapon1->TryCommitFire());
+    TestTrue(TEXT("aim after hip shot commit"), F.Press());
+    TestTrue(TEXT("already committed hip shot retains hip cone"), HasSpread(F.Weapon1));
+    F.World->Tick(LEVELTICK_All, 0.02f);
+    TestTrue(TEXT("aim shot accepted"), F.Weapon1->TryCommitFire());
+    F.Release();
+    TestTrue(TEXT("committed aim shot stays exact after release"), AllDirectionsExact(F.Weapon1));
+    TestTrue(TEXT("re-enter aim"), F.Press());
+    D->bUseAimingSpread = false;
+    F.World->Tick(LEVELTICK_All, 0.02f);
+    TestTrue(TEXT("fallback shot accepted"), F.Weapon1->TryCommitFire());
+    TestTrue(TEXT("disabled feature uses legacy hip spread while aiming"), HasSpread(F.Weapon1));
+    D->bUseAimingSpread = true;
+    UWeaponDefinitionData* Captured = NewObject<UWeaponDefinitionData>();
+    F.Weapon1->CaptureDefinition(Captured);
+    TestTrue(TEXT("capture preserves aim opt-in"), Captured->bUseAimingSpread);
+    TestEqual(TEXT("capture preserves aim spread"), Captured->AimingSpread.MovingSpreadAngle, 0.0f);
+    TestEqual(TEXT("shared hip definition was not mutated by shooting"), D->StationarySpreadAngle, 6.0f);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDualSpreadBloomTest, "Dust2.Aim.DualSpread.BloomDoesNotResetOnToggle",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FDualSpreadBloomTest::RunTest(const FString& Parameters)
+{
+    AddExpectedMessage(TEXT("Inventory mirror sync rejected"), ELogVerbosity::Warning,
+        EAutomationExpectedMessageFlags::Contains, 0);
+    FAimTestWorld F;
+    if (!TestTrue(TEXT("fixture ready"), F.bReady)) return false;
+    UWeaponDefinitionData* D = ConfigureDualSpread(F);
+    D->bUseFiringSpread = D->AimingSpread.bUseFiringSpread = true;
+    D->SpreadPerShot = 0.5f;
+    D->MaxFiringSpread = 2.0f;
+    D->SpreadRecoveryDelay = D->AimingSpread.SpreadRecoveryDelay = 0.5f;
+    D->SpreadRecoverySpeed = D->AimingSpread.SpreadRecoverySpeed = 1.0f;
+    D->AimingSpread.SpreadPerShot = 0.1f;
+    D->AimingSpread.MaxFiringSpread = 0.4f;
+    TestTrue(TEXT("hip accepted"), F.Weapon1->TryCommitFire());
+    TestTrue(TEXT("hip bloom advances"), FMath::IsNearlyEqual(F.Weapon1->GetCurrentFiringSpread(), 0.5f));
+    F.Press();
+    TestTrue(TEXT("aim bloom also remembers hip shot"), FMath::IsNearlyEqual(F.Weapon1->GetCurrentFiringSpread(), 0.1f));
+    F.World->Tick(LEVELTICK_All, 0.02f);
+    TestTrue(TEXT("aim accepted"), F.Weapon1->TryCommitFire());
+    TestTrue(TEXT("aim bloom advances"), FMath::IsNearlyEqual(F.Weapon1->GetCurrentFiringSpread(), 0.2f));
+    F.Release();
+    TestTrue(TEXT("hip remembers aim shot"), FMath::IsNearlyEqual(F.Weapon1->GetCurrentFiringSpread(), 1.0f));
+    F.Press();
+    TestTrue(TEXT("toggle does not clear aim bloom"), FMath::IsNearlyEqual(F.Weapon1->GetCurrentFiringSpread(), 0.2f));
+    SetAimTestInt(F.Weapon1, TEXT("CurrentAmmo"), 0);
+    TestFalse(TEXT("empty shot rejected"), F.Weapon1->TryCommitFire());
+    TestTrue(TEXT("rejected shot does not grow aim bloom"), FMath::IsNearlyEqual(F.Weapon1->GetCurrentFiringSpread(), 0.2f));
+    for (int32 Frame = 0; Frame < 15; ++Frame)
+        F.World->Tick(LEVELTICK_All, 0.05f);
+    TestTrue(TEXT("aim bloom recovers by its own profile"), FMath::IsNearlyZero(F.Weapon1->GetCurrentFiringSpread()));
+    F.Release();
+    TestTrue(TEXT("hip bloom recovers independently"), FMath::IsNearlyEqual(F.Weapon1->GetCurrentFiringSpread(), 0.75f, 0.001f));
+    F.Weapon1->ResetRecoilPattern();
+    TestTrue(TEXT("reset clears hip"), FMath::IsNearlyZero(F.Weapon1->GetCurrentFiringSpread()));
+    F.Press();
+    TestTrue(TEXT("reset also clears aim"), FMath::IsNearlyZero(F.Weapon1->GetCurrentFiringSpread()));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDualSpreadSniperTest, "Dust2.Aim.DualSpread.SniperExactAimRandomHip",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FDualSpreadSniperTest::RunTest(const FString& Parameters)
+{
+    AddExpectedMessage(TEXT("Inventory mirror sync rejected"), ELogVerbosity::Warning,
+        EAutomationExpectedMessageFlags::Contains, 0);
+    FAimTestWorld F;
+    if (!TestTrue(TEXT("fixture ready"), F.bReady)) return false;
+    UWeaponDefinitionData* D = ConfigureDualSpread(F);
+    D->bIgnoreShotRecoilWhenAiming = true;
+    D->RecoilData = NewObject<UWeaponRecoilData>(D);
+    D->RecoilData->bUseFixedPattern = true;
+    D->RecoilData->bUseIndependentShotRecoil = true;
+    D->RecoilData->FixedPattern = {FVector2D(3.0f, 0.0f)};
+    D->RecoilData->FixedPatternPitchScale = 1.0f;
+    D->RecoilData->FixedPatternYawScale = 1.0f;
+    D->RecoilData->PatternResetDelay = 100.0f;
+    F.Weapon1->ApplyDefinitionSettings();
+    TestTrue(TEXT("hip shot accepted"), F.Weapon1->TryCommitFire());
+    TestTrue(TEXT("sniper hip is random"), HasSpread(F.Weapon1));
+    TestTrue(TEXT("sniper enters aim"), F.Press());
+    for (int32 Shot = 0; Shot < 3; ++Shot)
+    {
+        F.World->Tick(LEVELTICK_All, 0.02f);
+        TestTrue(TEXT("aim shot accepted"), F.Weapon1->TryCommitFire());
+        TestTrue(TEXT("moving aimed sniper ignores random and accumulated recoil"), AllDirectionsExact(F.Weapon1, 600.0f));
+        TestTrue(TEXT("airborne aimed sniper uses exact configured direction"), AllDirectionsExact(F.Weapon1, 600.0f, true));
+    }
+    float Pitch = 0, Yaw = 0;
+    bool bGenerated = false;
+    F.Weapon1->GenerateRecoilKick(Pitch, Yaw, bGenerated);
+    TestTrue(TEXT("aim still emits its configured visual recoil kick"), bGenerated && FMath::IsNearlyEqual(Pitch, 3.0f));
+    TestTrue(TEXT("switch accepted"), F.Inventory->TrySwitchWeaponNative());
+    TestFalse(TEXT("switch cancels aim"), F.Player->IsAiming());
+    F.World->Tick(LEVELTICK_All, 0.02f);
+    TestTrue(TEXT("old weapon hip shot accepted"), F.Weapon1->TryCommitFire());
+    TestTrue(TEXT("detached old weapon no longer retains exact aim state"), HasSpread(F.Weapon1));
+    return true;
+}
 #endif

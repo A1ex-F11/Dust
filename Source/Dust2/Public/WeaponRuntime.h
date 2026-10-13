@@ -5,6 +5,7 @@
 #include "GameFramework/Actor.h"
 #include"FireMode.h"
 #include"WeaponRecoilData.h"
+#include "WeaponDefinitionData.h"
 #include "WeaponRuntime.generated.h"
 
 class UWeaponDefinitionData;
@@ -159,6 +160,17 @@ protected:
 	FText WeaponDisplayName;
 
 private:
+	friend class ADust2PlayerCharacter;
+	void SetOwnerAimState(bool bAiming) { bOwnerAiming = bAiming; }
+	FWeaponSpreadProfile GetSpreadProfile(bool bAiming) const;
+	float GetFiringSpreadForProfile(bool bAiming) const;
+	bool bOwnerAiming = false;
+	FWeaponSpreadProfile CommittedSpreadProfile;
+	bool bHasCommittedSpreadProfile = false;
+	bool bCommittedIgnoreShotRecoil = false;
+	float AccumulatedAimFiringSpread = 0.0f;
+	float LastAimSpreadShotTime = 0.0f;
+	bool bHasAimSpreadShot = false;
 	void CacheCommittedRecoil(float SuccessfulShotTime);
 	void CacheCommittedFiringSpread(float SuccessfulShotTime);
 	float AccumulatedFiringSpread = 0.0f;

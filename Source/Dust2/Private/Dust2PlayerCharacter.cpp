@@ -466,6 +466,10 @@ void ADust2PlayerCharacter::SetNativeAimState(bool bAiming)
         return;
     }
     bNativeAiming = bAiming;
+    if (AWeaponRuntime* Weapon = ObservedAimWeapon.Get())
+    {
+        Weapon->SetOwnerAimState(bAiming);
+    }
     ReceiveAimStateChanged(bAiming);
 }
 
@@ -479,6 +483,7 @@ void ADust2PlayerCharacter::ObserveAimWeapon(AWeaponRuntime* Weapon)
     CancelAim();
     if (AWeaponRuntime* Old = ObservedAimWeapon.Get())
     {
+        Old->SetOwnerAimState(false);
         Old->OnReloadStarted.RemoveDynamic(
             this, &ADust2PlayerCharacter::HandleAimReloadStarted);
         Old->OnDestroyed.RemoveDynamic(
@@ -487,6 +492,7 @@ void ADust2PlayerCharacter::ObserveAimWeapon(AWeaponRuntime* Weapon)
     ObservedAimWeapon = Weapon;
     if (Weapon)
     {
+        Weapon->SetOwnerAimState(bNativeAiming);
         Weapon->OnReloadStarted.AddUniqueDynamic(
             this, &ADust2PlayerCharacter::HandleAimReloadStarted);
         Weapon->OnDestroyed.AddUniqueDynamic(

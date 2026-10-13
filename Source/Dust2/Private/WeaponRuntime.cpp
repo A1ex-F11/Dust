@@ -94,6 +94,8 @@ void AWeaponRuntime::RestoreAmmo(int32 NewCurrentAmmo, int32 NewReserveAmmo)
 }
 bool AWeaponRuntime::TryCommitFire()
 {
+	bHasCommittedSpreadProfile = false;
+	bCommittedIgnoreShotRecoil = false;
 	CommittedFiringSpread = 0.0f;
 	ClearPendingRecoilKick();
 	bHasCommittedShotDirection = false;
@@ -116,6 +118,10 @@ bool AWeaponRuntime::TryCommitFire()
 	{
 		return false;
 	}
+	CommittedSpreadProfile = GetSpreadProfile(bOwnerAiming);
+	bHasCommittedSpreadProfile = true;
+	bCommittedIgnoreShotRecoil = bOwnerAiming && WeaponDefinition &&
+		WeaponDefinition->bUseAimingSpread && WeaponDefinition->bIgnoreShotRecoilWhenAiming;
 	CacheCommittedFiringSpread(CurrentTime);
 	CacheCommittedRecoil(CurrentTime);
 	NextFireTime = CurrentTime + GetEffectiveFireInterval();
@@ -159,6 +165,10 @@ void AWeaponRuntime::GenerateRecoilKick(
 
 void AWeaponRuntime::ResetRecoilPattern()
 {
+	AccumulatedAimFiringSpread = 0.0f;
+	bHasAimSpreadShot = false;
+	bHasCommittedSpreadProfile = false;
+	bCommittedIgnoreShotRecoil = false;
 	AccumulatedFiringSpread = 0.0f;
 	CommittedFiringSpread = 0.0f;
 	bHasSpreadShot = false;
@@ -324,26 +334,29 @@ void AWeaponRuntime::GenerateShotDirection(
 	if (RecoilData && RecoilData->bUseFixedPattern && RecoilData->bUseIndependentShotRecoil)
 	{
 		if (!bHasCommittedShotDirection) return;
-		BaseDirection = FShotRecoilMath::Apply(BaseDirection, CommittedShotRecoil);
+		if (!bCommittedIgnoreShotRecoil)
+			BaseDirection = FShotRecoilMath::Apply(BaseDirection, CommittedShotRecoil);
 		if (BaseDirection.IsNearlyZero()) return;
 	}
-	const float SafeMovementSpreadSpeedThreshold = FMath::Max(0.0f, MovementSpreadSpeedThreshold);
-	float SelectedSpreadAngle = MovingSpreadAngle;
+	const FWeaponSpreadProfile Profile = bHasCommittedSpreadProfile
+		? CommittedSpreadProfile : GetSpreadProfile(bOwnerAiming);
+	const float SafeMovementSpreadSpeedThreshold = FMath::Max(0.0f, Profile.MovementSpreadSpeedThreshold);
+	float SelectedSpreadAngle = Profile.MovingSpreadAngle;
 	if (bIsFalling)
 	{
-		SelectedSpreadAngle = JumpSpreadAngle;
+		SelectedSpreadAngle = Profile.JumpSpreadAngle;
 	}
 	else if (bIsCrouched)
 	{
-		SelectedSpreadAngle = StationarySpreadAngle;
+		SelectedSpreadAngle = Profile.StationarySpreadAngle;
 	}
 	else if (SafeCurrentHorizontalSpeed <= SafeMovementSpreadSpeedThreshold)
 	{
-		SelectedSpreadAngle = StationarySpreadAngle;
+		SelectedSpreadAngle = Profile.StationarySpreadAngle;
 	}
 	else if (bIsSlowWalking)
 	{
-		SelectedSpreadAngle = SlowWalkSpreadAngle;
+		SelectedSpreadAngle = Profile.SlowWalkSpreadAngle;
 	}
 	const float SafeSpreadAngle = FMath::Clamp(
 		(FMath::IsFinite(SelectedSpreadAngle) ? FMath::Max(0.0f, SelectedSpreadAngle) : 0.0f) + CommittedFiringSpread, 0.0f, 89.0f);
@@ -556,6 +569,9 @@ void AWeaponRuntime::ApplyDefinitionSettings()
 void AWeaponRuntime::CaptureDefinition(UWeaponDefinitionData* D) const
 {
  if (!D) return;
+ D->bUseAimingSpread = WeaponDefinition && WeaponDefinition->bUseAimingSpread;
+ D->AimingSpread = WeaponDefinition ? WeaponDefinition->AimingSpread : FWeaponSpreadProfile{};
+ D->bIgnoreShotRecoilWhenAiming = WeaponDefinition && WeaponDefinition->bIgnoreShotRecoilWhenAiming;
  D->WeaponDisplayName = WeaponDisplayName;
  D->DefaultFireMode = CurrentFireMode;
  D->AllowedFireModes = AllowedFireModes;
@@ -582,22 +598,56 @@ void AWeaponRuntime::CaptureDefinition(UWeaponDefinitionData* D) const
 
 float AWeaponRuntime::GetCurrentFiringSpread() const
 {
- if (!WeaponDefinition || !WeaponDefinition->bUseFiringSpread || !bHasSpreadShot || !GetWorld()) return 0.0f;
- return FFiringSpreadMath::Recover(AccumulatedFiringSpread, GetWorld()->GetTimeSeconds() - LastSpreadShotTime,
-  WeaponDefinition->SpreadRecoveryDelay, WeaponDefinition->SpreadRecoverySpeed, WeaponDefinition->MaxFiringSpread);
+ return GetFiringSpreadForProfile(bOwnerAiming);
+}
+
+FWeaponSpreadProfile AWeaponRuntime::GetSpreadProfile(bool bAiming) const
+{
+ if (bAiming && WeaponDefinition && WeaponDefinition->bUseAimingSpread)
+  return WeaponDefinition->AimingSpread;
+ FWeaponSpreadProfile P;
+ P.StationarySpreadAngle = StationarySpreadAngle;
+ P.MovingSpreadAngle = MovingSpreadAngle;
+ P.JumpSpreadAngle = JumpSpreadAngle;
+ P.SlowWalkSpreadAngle = SlowWalkSpreadAngle;
+ P.MovementSpreadSpeedThreshold = MovementSpreadSpeedThreshold;
+ if (WeaponDefinition)
+ {
+  P.bUseFiringSpread = WeaponDefinition->bUseFiringSpread;
+  P.SpreadPerShot = WeaponDefinition->SpreadPerShot;
+  P.MaxFiringSpread = WeaponDefinition->MaxFiringSpread;
+  P.SpreadRecoveryDelay = WeaponDefinition->SpreadRecoveryDelay;
+  P.SpreadRecoverySpeed = WeaponDefinition->SpreadRecoverySpeed;
+ }
+ return P;
+}
+
+float AWeaponRuntime::GetFiringSpreadForProfile(bool bAiming) const
+{
+ const bool bAimProfile = bAiming && WeaponDefinition && WeaponDefinition->bUseAimingSpread;
+ const FWeaponSpreadProfile P = GetSpreadProfile(bAimProfile);
+ const bool bHasShot = bAimProfile ? bHasAimSpreadShot : bHasSpreadShot;
+ if (!P.bUseFiringSpread || !bHasShot || !GetWorld()) return 0.0f;
+ return FFiringSpreadMath::Recover(bAimProfile ? AccumulatedAimFiringSpread : AccumulatedFiringSpread,
+  GetWorld()->GetTimeSeconds() - (bAimProfile ? LastAimSpreadShotTime : LastSpreadShotTime),
+  P.SpreadRecoveryDelay, P.SpreadRecoverySpeed, P.MaxFiringSpread);
 }
 
 void AWeaponRuntime::CacheCommittedFiringSpread(float SuccessfulShotTime)
 {
  CommittedFiringSpread = GetCurrentFiringSpread();
- if (!WeaponDefinition || !WeaponDefinition->bUseFiringSpread)
+ // Advance both profiles on every accepted shot: changing aim cannot reset bloom.
+ const float AimBefore = GetFiringSpreadForProfile(true);
+ const float HipBefore = GetFiringSpreadForProfile(false);
+ for (int32 Mode = 0; Mode < 2; ++Mode)
  {
-  AccumulatedFiringSpread = 0.0f;
-  bHasSpreadShot = false;
-  return;
+  const FWeaponSpreadProfile P = GetSpreadProfile(Mode == 1);
+  float& Accumulated = Mode == 1 ? AccumulatedAimFiringSpread : AccumulatedFiringSpread;
+  float& LastTime = Mode == 1 ? LastAimSpreadShotTime : LastSpreadShotTime;
+  bool& bHasShot = Mode == 1 ? bHasAimSpreadShot : bHasSpreadShot;
+  Accumulated = P.bUseFiringSpread
+   ? FFiringSpreadMath::AddShot(Mode == 1 ? AimBefore : HipBefore, P.SpreadPerShot, P.MaxFiringSpread) : 0.0f;
+  LastTime = SuccessfulShotTime;
+  bHasShot = P.bUseFiringSpread;
  }
- AccumulatedFiringSpread = FFiringSpreadMath::AddShot(CommittedFiringSpread,
-  WeaponDefinition->SpreadPerShot, WeaponDefinition->MaxFiringSpread);
- LastSpreadShotTime = SuccessfulShotTime;
- bHasSpreadShot = true;
 }
