@@ -203,9 +203,12 @@ bool FAimKeepReloadTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("second aimed reload accepted"), F.Weapon1->TryStartReload());
     F.Release();
     TestFalse(TEXT("release during reload exits aim"), F.Player->IsAiming());
-    TestFalse(TEXT("a new aim during reload remains rejected"), F.Press());
+    TestTrue(TEXT("right press during reload enters aim"), F.Press());
+    F.Release();
+    TestFalse(TEXT("release during reload exits again"), F.Player->IsAiming());
+    TestTrue(TEXT("right press during reload can enter repeatedly"), F.Press());
     F.Weapon1->FinishReload();
-    TestFalse(TEXT("blocked press does not auto enter at completion"), F.Press());
+    TestTrue(TEXT("aim entered during reload remains at completion"), F.Player->IsAiming());
     F.Release();
     TestTrue(TEXT("repress after completion enters"), F.Press());
     TestTrue(TEXT("switch still accepted"), F.Inventory->TrySwitchWeaponNative());

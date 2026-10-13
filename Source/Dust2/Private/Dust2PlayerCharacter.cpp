@@ -443,7 +443,8 @@ bool ADust2PlayerCharacter::SetAimInputPressed(
     // This existing query covers binding, full Holster/Draw and pending
     // transitions. Reload/death/busy checks belong to the aim entry itself.
     if (IsDead() || !IsValid(Weapon) || !IsValid(Presentation) ||
-        BridgedInventory->IsInventoryBusy() || Weapon->IsReloading() ||
+        BridgedInventory->IsInventoryBusy() ||
+        (Weapon->IsReloading() && !bKeepAimDuringReload) ||
         !Presentation->CanStartReloadPresentation(Weapon, bPresentationSwitching))
     {
         return false;
