@@ -120,8 +120,8 @@ bool AWeaponRuntime::TryCommitFire()
 	}
 	CommittedSpreadProfile = GetSpreadProfile(bOwnerAiming);
 	bHasCommittedSpreadProfile = true;
-	bCommittedIgnoreShotRecoil = bOwnerAiming && WeaponDefinition &&
-		WeaponDefinition->bUseAimingSpread && WeaponDefinition->bIgnoreShotRecoilWhenAiming;
+	// ADS follows the supplied sight-aligned view ray; do not add hidden ballistic recoil.
+	bCommittedIgnoreShotRecoil = bOwnerAiming;
 	CacheCommittedFiringSpread(CurrentTime);
 	CacheCommittedRecoil(CurrentTime);
 	NextFireTime = CurrentTime + GetEffectiveFireInterval();

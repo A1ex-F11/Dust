@@ -372,4 +372,59 @@ bool FDualSpreadSniperTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("detached old weapon no longer retains exact aim state"), HasSpread(F.Weapon1));
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAimedViewDirectionTest, "Dust2.Aim.ViewDirection.HipUnchangedAimFollowsInput",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FAimedViewDirectionTest::RunTest(const FString& Parameters)
+{
+    AddExpectedMessage(TEXT("Inventory mirror sync rejected"), ELogVerbosity::Warning,
+        EAutomationExpectedMessageFlags::Contains, 0);
+    FAimTestWorld F;
+    if (!TestTrue(TEXT("fixture ready"), F.bReady)) return false;
+    UWeaponDefinitionData* D = ConfigureDualSpread(F);
+    D->StationarySpreadAngle = D->MovingSpreadAngle = D->JumpSpreadAngle = D->SlowWalkSpreadAngle = 0.0f;
+    D->bUseAimingSpread = false; // Direction policy must not depend on spread opt-in.
+    D->bIgnoreShotRecoilWhenAiming = false; // Legacy asset setting cannot reintroduce hidden ADS recoil.
+    D->RecoilData = NewObject<UWeaponRecoilData>(D);
+    D->RecoilData->bUseFixedPattern = true;
+    D->RecoilData->bUseIndependentShotRecoil = true;
+    D->RecoilData->FixedPattern = { FVector2D(3.0f, 1.0f) };
+    D->RecoilData->FixedPatternPitchScale = D->RecoilData->FixedPatternYawScale = 1.0f;
+    D->RecoilData->PatternResetDelay = 100.0f;
+    D->RecoilData->RecoveryDelay = 100.0f;
+    F.Weapon1->ApplyDefinitionSettings();
+    const FVector ViewDirection = FRotator(7.0f, 24.0f, 0.0f).Vector();
+    auto Generate = [&]() {
+        FVector Direction;
+        bool bGenerated = false;
+        F.Weapon1->GenerateShotDirection(ViewDirection, 0.0f, false, false, false, Direction, bGenerated);
+        TestTrue(TEXT("direction generated"), bGenerated);
+        return Direction;
+    };
+    TestTrue(TEXT("first hip shot accepted"), F.Weapon1->TryCommitFire());
+    TestTrue(TEXT("first hip shot starts at base direction"), Generate().Equals(ViewDirection, 0.00001f));
+    F.World->Tick(LEVELTICK_All, 0.02f);
+    TestTrue(TEXT("second hip accepted"), F.Weapon1->TryCommitFire());
+    TestTrue(TEXT("enter aim after hip commit"), F.Press());
+    TestFalse(TEXT("committed hip retains independent recoil after entering aim"), Generate().Equals(ViewDirection, 0.00001f));
+    F.World->Tick(LEVELTICK_All, 0.02f);
+    TestTrue(TEXT("aim shot accepted"), F.Weapon1->TryCommitFire());
+    F.Release();
+    TestTrue(TEXT("committed aim follows input even after release"), Generate().Equals(ViewDirection, 0.00001f));
+    float Pitch = 0.0f, Yaw = 0.0f;
+    bool bKick = false;
+    F.Weapon1->GenerateRecoilKick(Pitch, Yaw, bKick);
+    TestTrue(TEXT("visual recoil feedback preserved"), bKick && FMath::IsNearlyEqual(Pitch, 3.0f));
+    F.World->Tick(LEVELTICK_All, 0.02f);
+    TestTrue(TEXT("returned hip accepted"), F.Weapon1->TryCommitFire());
+    TestFalse(TEXT("returning hip retains accumulated recoil"), Generate().Equals(ViewDirection, 0.00001f));
+    TestTrue(TEXT("enter aim with spread enabled"), F.Press());
+    D->bUseAimingSpread = true;
+    D->AimingSpread.StationarySpreadAngle = 1.0f;
+    F.World->Tick(LEVELTICK_All, 0.02f);
+    TestTrue(TEXT("spread aim shot accepted"), F.Weapon1->TryCommitFire());
+    const float ConeCos = FMath::Cos(FMath::DegreesToRadians(1.01f));
+    for (int32 Sample = 0; Sample < 32; ++Sample)
+        TestTrue(TEXT("ADS spread stays around view rather than hidden recoil"), FVector::DotProduct(Generate(), ViewDirection) >= ConeCos);
+    return true;
+}
 #endif

@@ -50,9 +50,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="枪械配置|瞄准散布",
 		meta=(DisplayName="右键瞄准散布参数", EditCondition="bUseAimingSpread"))
 	FWeaponSpreadProfile AimingSpread;
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="枪械配置|瞄准散布",
-		meta=(DisplayName="瞄准弹道忽略累计后坐", EditCondition="bUseAimingSpread",
-			ToolTip="适合精确狙击：瞄准子弹不使用累计方向后坐；保留镜头/枪身反馈。普通步枪建议关闭。"))
+	// Serialized legacy field only. ADS now always follows the input view direction.
+	UPROPERTY()
 	bool bIgnoreShotRecoilWhenAiming = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|基础",
