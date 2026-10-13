@@ -7,6 +7,7 @@
 #include "CameraRecoilRecoveryComponent.h"
 #include "Components/ChildActorComponent.h"
 #include "Templates/UnrealTemplate.h"
+#include "WeaponPresentationComponent.h"
 
 ADust2PlayerCharacter::ADust2PlayerCharacter()
 {
@@ -45,6 +46,7 @@ bool ADust2PlayerCharacter::ApplyDamage(float Amount, bool& bDiedNow)
 	if (bDiedNow)
 	{
 		bDeathRequested = true;
+		CancelAim();
 	}
 	return bHealthChanged;
 }
@@ -63,6 +65,7 @@ bool ADust2PlayerCharacter::ApplyHeal(float Amount)
 }
 void ADust2PlayerCharacter::RestoreHealth(float SavedHealth)
 {
+	CancelAim();
 	CurrentHealth = FMath::Clamp(SavedHealth, 0.0f, MaxHealth);
 	bDeathRequested = false;
 }
@@ -358,6 +361,7 @@ void ADust2PlayerCharacter::HandleInventoryBridgeChanged(
     AWeaponRuntime* Slot1Weapon, AWeaponRuntime* Slot2Weapon,
     AWeaponRuntime* CurrentWeapon)
 {
+    ObserveAimWeapon(CurrentWeapon);
     if (IsValid(BridgedInventory))
     {
         BridgedInventory->SyncLegacyWeaponReferences();
@@ -367,6 +371,8 @@ void ADust2PlayerCharacter::HandleInventoryBridgeChanged(
 void ADust2PlayerCharacter::HandleInventoryBridgeBeforeChange(
     AWeaponRuntime* OldWeapon)
 {
+    CancelAim();
+    ObserveAimWeapon(nullptr);
     ReceiveBeforeInventoryWeaponChange(OldWeapon);
 }
 
@@ -384,6 +390,9 @@ void ADust2PlayerCharacter::HandleInventoryBridgeEquipped(
 
 void ADust2PlayerCharacter::UnbindInventoryBridge()
 {
+    CancelAim();
+    ObserveAimWeapon(nullptr);
+    AimPresentation.Reset();
     if (IsValid(BridgedInventory))
     {
         BridgedInventory->OnInventoryChanged.RemoveDynamic(
@@ -395,6 +404,107 @@ void ADust2PlayerCharacter::UnbindInventoryBridge()
     }
     BridgedInventory = nullptr;
     BridgedRecoilRecovery = nullptr;
+}
+
+bool ADust2PlayerCharacter::InitializeAimState(
+    UWeaponPresentationComponent* Presentation)
+{
+    if (!IsValid(Presentation) || Presentation->GetOwner() != this ||
+        !Presentation->IsRegistered() || !IsValid(BridgedInventory))
+    {
+        return false;
+    }
+    if (AimPresentation.Get() != Presentation)
+    {
+        CancelAim();
+    }
+    AimPresentation = Presentation;
+    ObserveAimWeapon(BridgedInventory->GetCurrentWeaponNative());
+    return true;
+}
+
+bool ADust2PlayerCharacter::SetAimInputPressed(
+    bool bPressed, bool bPresentationSwitching)
+{
+    if (!bPressed)
+    {
+        bAimInputHeld = false;
+        CancelAim();
+        return false;
+    }
+    if (bAimInputHeld)
+    {
+        return bNativeAiming;
+    }
+    bAimInputHeld = true;
+    UWeaponPresentationComponent* Presentation = AimPresentation.Get();
+    AWeaponRuntime* Weapon = IsValid(BridgedInventory)
+        ? BridgedInventory->GetCurrentWeaponNative() : nullptr;
+    // This existing query covers binding, full Holster/Draw and pending
+    // transitions. Reload/death/busy checks belong to the aim entry itself.
+    if (IsDead() || !IsValid(Weapon) || !IsValid(Presentation) ||
+        BridgedInventory->IsInventoryBusy() || Weapon->IsReloading() ||
+        !Presentation->CanStartReloadPresentation(Weapon, bPresentationSwitching))
+    {
+        return false;
+    }
+    ObserveAimWeapon(Weapon);
+    SetNativeAimState(true);
+    return bNativeAiming;
+}
+
+void ADust2PlayerCharacter::CancelAim()
+{
+    SetNativeAimState(false);
+}
+
+void ADust2PlayerCharacter::SetNativeAimState(bool bAiming)
+{
+    if (bNativeAiming == bAiming)
+    {
+        return;
+    }
+    bNativeAiming = bAiming;
+    ReceiveAimStateChanged(bAiming);
+}
+
+void ADust2PlayerCharacter::ObserveAimWeapon(AWeaponRuntime* Weapon)
+{
+    Weapon = IsValid(Weapon) ? Weapon : nullptr;
+    if (ObservedAimWeapon.Get() == Weapon)
+    {
+        return;
+    }
+    CancelAim();
+    if (AWeaponRuntime* Old = ObservedAimWeapon.Get())
+    {
+        Old->OnReloadStarted.RemoveDynamic(
+            this, &ADust2PlayerCharacter::HandleAimReloadStarted);
+        Old->OnDestroyed.RemoveDynamic(
+            this, &ADust2PlayerCharacter::HandleAimWeaponDestroyed);
+    }
+    ObservedAimWeapon = Weapon;
+    if (Weapon)
+    {
+        Weapon->OnReloadStarted.AddUniqueDynamic(
+            this, &ADust2PlayerCharacter::HandleAimReloadStarted);
+        Weapon->OnDestroyed.AddUniqueDynamic(
+            this, &ADust2PlayerCharacter::HandleAimWeaponDestroyed);
+    }
+}
+
+void ADust2PlayerCharacter::HandleAimReloadStarted()
+{
+    CancelAim();
+}
+
+void ADust2PlayerCharacter::HandleAimWeaponDestroyed(AActor* DestroyedActor)
+{
+    if (ObservedAimWeapon == TWeakObjectPtr<AWeaponRuntime>(Cast<AWeaponRuntime>(DestroyedActor)))
+    {
+        CancelAim();
+        ObserveAimWeapon(nullptr);
+    }
 }
 bool ADust2PlayerCharacter::HasConsumedPickupInitialDraw_Implementation(
     AWeaponRuntime* FormalWeapon) const

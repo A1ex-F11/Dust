@@ -11,6 +11,7 @@ class AWeaponRuntime;
 class UWeaponInventoryComponent;
 class UChildActorComponent;
 class UCameraRecoilRecoveryComponent;
+class UWeaponPresentationComponent;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnAimedWeaponPickupChanged, AActor*, AimedPickup);
 UCLASS()
@@ -20,6 +21,21 @@ class DUST2_API ADust2PlayerCharacter : public ACharacter
 
 public:
 	ADust2PlayerCharacter();
+	// Explicit opt-in after the Blueprint camera/HUD/animation setup is ready.
+	UFUNCTION(BlueprintCallable, Category = "Weapon|Aim")
+	bool InitializeAimState(UWeaponPresentationComponent* Presentation);
+	// Call on Started / Completed / Canceled, not every Triggered frame.
+	UFUNCTION(BlueprintCallable, Category = "Weapon|Aim")
+	bool SetAimInputPressed(bool bPressed, bool bPresentationSwitching);
+	// Leaves the held-input latch set: the player must release before re-aiming.
+	UFUNCTION(BlueprintCallable, Category = "Weapon|Aim")
+	void CancelAim();
+	UFUNCTION(BlueprintPure, Category = "Weapon|Aim")
+	bool IsAiming() const { return bNativeAiming; }
+	UFUNCTION(BlueprintPure, Category = "Weapon|Aim")
+	bool IsAimInputHeld() const { return bAimInputHeld; }
+	UFUNCTION(BlueprintImplementableEvent, Category = "Weapon|Aim")
+	void ReceiveAimStateChanged(bool bAiming);
 	// Replace the three Blueprint inventory bindings and initialization call.
 	// Blueprint presentation handlers must be implemented before calling this.
 	UFUNCTION(BlueprintCallable, Category = "Weapon|Inventory",
@@ -104,6 +120,18 @@ protected:
 	bool bAutomaticOnly, AActor* ExcludedPickup) const;
 
 private:
+	void SetNativeAimState(bool bAiming);
+	void ObserveAimWeapon(AWeaponRuntime* Weapon);
+	UFUNCTION()
+	void HandleAimReloadStarted();
+	UFUNCTION()
+	void HandleAimWeaponDestroyed(AActor* DestroyedActor);
+	UPROPERTY(Transient)
+	TWeakObjectPtr<UWeaponPresentationComponent> AimPresentation;
+	UPROPERTY(Transient)
+	TWeakObjectPtr<AWeaponRuntime> ObservedAimWeapon;
+	bool bNativeAiming = false;
+	bool bAimInputHeld = false;
 	UFUNCTION()
 	void HandleInventoryBridgeChanged(AWeaponRuntime* Slot1Weapon,
 		AWeaponRuntime* Slot2Weapon, AWeaponRuntime* CurrentWeapon);
