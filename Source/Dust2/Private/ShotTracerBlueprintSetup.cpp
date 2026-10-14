@@ -22,8 +22,6 @@
 #include "K2Node_ExecutionSequence.h"
 #include "K2Node_IfThenElse.h"
 #include "K2Node_VariableGet.h"
-#include "K2Node_BreakStruct.h"
-#include "EdGraphSchema_K2.h"
 #include "Misc/DateTime.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
