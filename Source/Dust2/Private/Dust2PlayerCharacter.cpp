@@ -47,6 +47,7 @@ bool ADust2PlayerCharacter::ApplyDamage(float Amount, bool& bDiedNow)
 	{
 		bDeathRequested = true;
 		CancelAim();
+		ClearGaitIntent();
 	}
 	return bHealthChanged;
 }
@@ -66,8 +67,63 @@ bool ADust2PlayerCharacter::ApplyHeal(float Amount)
 void ADust2PlayerCharacter::RestoreHealth(float SavedHealth)
 {
 	CancelAim();
+	ClearGaitIntent();
 	CurrentHealth = FMath::Clamp(SavedHealth, 0.0f, MaxHealth);
 	bDeathRequested = false;
+}
+
+void ADust2PlayerCharacter::SetSprintHeld(bool bHeld)
+{
+	if (bSprintHeld == bHeld)
+	{
+		return;
+	}
+	bSprintHeld = bHeld;
+	ResolveGaitIntent();
+}
+
+void ADust2PlayerCharacter::SetSlowWalkHeld(bool bHeld)
+{
+	if (bSlowWalkHeld == bHeld)
+	{
+		return;
+	}
+	bSlowWalkHeld = bHeld;
+	ResolveGaitIntent();
+}
+
+void ADust2PlayerCharacter::ClearGaitIntent()
+{
+	const bool bHadHold = bSprintHeld || bSlowWalkHeld;
+	const bool bWasNotWalk = CurrentGait != EDustMovementGait::Walk;
+	bSprintHeld = false;
+	bSlowWalkHeld = false;
+	if (!bHadHold && !bWasNotWalk)
+	{
+		return;
+	}
+	CurrentGait = EDustMovementGait::Walk;
+	ReceiveGaitChanged(CurrentGait);
+}
+
+void ADust2PlayerCharacter::ResolveGaitIntent()
+{
+	EDustMovementGait Desired = EDustMovementGait::Walk;
+	if (bSlowWalkHeld)
+	{
+		Desired = EDustMovementGait::SlowWalk;
+	}
+	else if (bSprintHeld)
+	{
+		Desired = EDustMovementGait::Run;
+	}
+
+	if (CurrentGait == Desired)
+	{
+		return;
+	}
+	CurrentGait = Desired;
+	ReceiveGaitChanged(CurrentGait);
 }
 
 bool ADust2PlayerCharacter::CanStartReloadRequest_Implementation(
@@ -529,4 +585,30 @@ bool ADust2PlayerCharacter::HasConsumedPickupInitialDraw_Implementation(
 void ADust2PlayerCharacter::ApplyPickupInitialDrawConsumed_Implementation(
     AWeaponRuntime* FormalWeapon)
 {
+}
+bool ADust2PlayerCharacter::TryBuildDropSnapshotNative(
+    AWeaponRuntime* CurrentWeapon,
+    AWeaponRuntime* Slot1Weapon,
+    AWeaponRuntime* Slot2Weapon,
+    FWeaponPickupState& OutState,
+    bool& bOutOldInSlot1)
+{
+    OutState = FWeaponPickupState{};
+    bOutOldInSlot1 = false;
+
+    if (!IsValid(CurrentWeapon) ||
+        !IsValid(Slot1Weapon) ||
+        !IsValid(Slot2Weapon) ||
+        Slot1Weapon == Slot2Weapon ||
+        (CurrentWeapon != Slot1Weapon &&
+            CurrentWeapon != Slot2Weapon))
+    {
+        return false;
+    }
+
+    bOutOldInSlot1 = CurrentWeapon == Slot1Weapon;
+    OutState = CurrentWeapon->CapturePickupRuntimeState(
+        HasConsumedPickupInitialDraw(CurrentWeapon));
+
+    return OutState.bHasSavedState;
 }

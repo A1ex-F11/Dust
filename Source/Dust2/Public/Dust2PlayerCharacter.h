@@ -14,6 +14,15 @@ class UCameraRecoilRecoveryComponent;
 class UWeaponPresentationComponent;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnAimedWeaponPickupChanged, AActor*, AimedPickup);
+
+UENUM(BlueprintType)
+enum class EDustMovementGait : uint8
+{
+	Walk UMETA(DisplayName = "Walk"),
+	Run UMETA(DisplayName = "Run"),
+	SlowWalk UMETA(DisplayName = "SlowWalk")
+};
+
 UCLASS()
 class DUST2_API ADust2PlayerCharacter : public ACharacter
 {
@@ -36,6 +45,20 @@ public:
 	bool IsAimInputHeld() const { return bAimInputHeld; }
 	UFUNCTION(BlueprintImplementableEvent, Category = "Weapon|Aim")
 	void ReceiveAimStateChanged(bool bAiming);
+
+	// Call on Started / Completed / Canceled, not every Triggered frame.
+	UFUNCTION(BlueprintCallable, Category = "Movement|Gait")
+	void SetSprintHeld(bool bHeld);
+	UFUNCTION(BlueprintCallable, Category = "Movement|Gait")
+	void SetSlowWalkHeld(bool bHeld);
+	UFUNCTION(BlueprintCallable, Category = "Movement|Gait")
+	void ClearGaitIntent();
+	UFUNCTION(BlueprintPure, Category = "Movement|Gait")
+	EDustMovementGait GetCurrentGait() const { return CurrentGait; }
+	UFUNCTION(BlueprintPure, Category = "Movement|Gait")
+	bool IsSlowWalking() const { return CurrentGait == EDustMovementGait::SlowWalk; }
+	UFUNCTION(BlueprintImplementableEvent, Category = "Movement|Gait")
+	void ReceiveGaitChanged(EDustMovementGait NewGait);
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Aim",
 		meta = (DisplayName = "换弹时保持瞄准",
 			ToolTip = "已在瞄准时开始换弹，保留瞄准视野和准星状态；松开右键仍退出。"))
@@ -93,7 +116,13 @@ public:
 	void ApplyPickupInitialDrawConsumed(AWeaponRuntime* FormalWeapon);
 	virtual void ApplyPickupInitialDrawConsumed_Implementation(
 		AWeaponRuntime* FormalWeapon);
-
+	UFUNCTION(BlueprintCallable, Category = "Weapon|Pickup")
+	bool TryBuildDropSnapshotNative(
+		AWeaponRuntime* CurrentWeapon,
+		AWeaponRuntime* Slot1Weapon,
+		AWeaponRuntime* Slot2Weapon,
+		FWeaponPickupState& OutState,
+		bool& bOutOldInSlot1);
 	UFUNCTION(BlueprintPure, Category = "Weapon|Pickup")
 	AActor* GetNearbyWeaponPickupForAutoFill(AActor* ExcludedPickup) const;
 protected:
@@ -124,6 +153,11 @@ protected:
 	bool bAutomaticOnly, AActor* ExcludedPickup) const;
 
 private:
+	void ResolveGaitIntent();
+	bool bSprintHeld = false;
+	bool bSlowWalkHeld = false;
+	EDustMovementGait CurrentGait = EDustMovementGait::Walk;
+
 	void SetNativeAimState(bool bAiming);
 	void ObserveAimWeapon(AWeaponRuntime* Weapon);
 	UFUNCTION()
