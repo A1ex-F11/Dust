@@ -153,9 +153,18 @@ protected:
 	bool bAutomaticOnly, AActor* ExcludedPickup) const;
 
 private:
+	enum class EDustGaitModifier : uint8
+	{
+		None,
+		Sprint,
+		SlowWalk
+	};
+
 	void ResolveGaitIntent();
 	bool bSprintHeld = false;
 	bool bSlowWalkHeld = false;
+	// When both modifiers are held, the most recently pressed one wins.
+	EDustGaitModifier LastPressedGaitModifier = EDustGaitModifier::None;
 	EDustMovementGait CurrentGait = EDustMovementGait::Walk;
 
 	void SetNativeAimState(bool bAiming);

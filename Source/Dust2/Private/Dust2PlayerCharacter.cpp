@@ -79,6 +79,10 @@ void ADust2PlayerCharacter::SetSprintHeld(bool bHeld)
 		return;
 	}
 	bSprintHeld = bHeld;
+	if (bHeld)
+	{
+		LastPressedGaitModifier = EDustGaitModifier::Sprint;
+	}
 	ResolveGaitIntent();
 }
 
@@ -89,6 +93,10 @@ void ADust2PlayerCharacter::SetSlowWalkHeld(bool bHeld)
 		return;
 	}
 	bSlowWalkHeld = bHeld;
+	if (bHeld)
+	{
+		LastPressedGaitModifier = EDustGaitModifier::SlowWalk;
+	}
 	ResolveGaitIntent();
 }
 
@@ -98,6 +106,7 @@ void ADust2PlayerCharacter::ClearGaitIntent()
 	const bool bWasNotWalk = CurrentGait != EDustMovementGait::Walk;
 	bSprintHeld = false;
 	bSlowWalkHeld = false;
+	LastPressedGaitModifier = EDustGaitModifier::None;
 	if (!bHadHold && !bWasNotWalk)
 	{
 		return;
@@ -109,13 +118,23 @@ void ADust2PlayerCharacter::ClearGaitIntent()
 void ADust2PlayerCharacter::ResolveGaitIntent()
 {
 	EDustMovementGait Desired = EDustMovementGait::Walk;
-	if (bSlowWalkHeld)
+	if (bSprintHeld && bSlowWalkHeld)
+	{
+		Desired = (LastPressedGaitModifier == EDustGaitModifier::SlowWalk)
+			? EDustMovementGait::SlowWalk
+			: EDustMovementGait::Run;
+	}
+	else if (bSlowWalkHeld)
 	{
 		Desired = EDustMovementGait::SlowWalk;
 	}
 	else if (bSprintHeld)
 	{
 		Desired = EDustMovementGait::Run;
+	}
+	else
+	{
+		LastPressedGaitModifier = EDustGaitModifier::None;
 	}
 
 	if (CurrentGait == Desired)
