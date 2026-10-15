@@ -63,6 +63,12 @@ struct DUST2_API FWeaponPresentationProfile
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire",
 		meta = (DisplayName = "枪身最后一发开火蒙太奇"))
 	TObjectPtr<UAnimMontage> EmptyFireWeaponMontage = nullptr;
+	// W06: failed empty trigger audio, independent of the last successful shot montage.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire", meta = (DisplayName = "空仓扣扳机提示声"))
+	TObjectPtr<USoundBase> DryFireSound = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire", meta = (DisplayName = "空仓提示最小间隔", ClampMin = "0.0", Units = "s"))
+	float DryFireMinInterval = 0.15f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reload",
 		meta = (DisplayName = "枪身普通换弹蒙太奇"))

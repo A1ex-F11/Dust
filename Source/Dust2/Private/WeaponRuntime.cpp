@@ -94,6 +94,11 @@ void AWeaponRuntime::RestoreAmmo(int32 NewCurrentAmmo, int32 NewReserveAmmo)
 }
 bool AWeaponRuntime::TryCommitFire()
 {
+	return TryCommitFireWithResult() == EWeaponFireAttemptResult::Committed;
+}
+
+EWeaponFireAttemptResult AWeaponRuntime::TryCommitFireWithResult()
+{
 	bHasCommittedSpreadProfile = false;
 	bCommittedIgnoreShotRecoil = false;
 	CommittedFiringSpread = 0.0f;
@@ -101,22 +106,22 @@ bool AWeaponRuntime::TryCommitFire()
 	bHasCommittedShotDirection = false;
 	if (bIsReloading)
 	{
-		return false;
+		return EWeaponFireAttemptResult::Reloading;
 	}
 
 	UWorld* World = GetWorld();
 	if (!World)
 	{
-		return false;
+		return EWeaponFireAttemptResult::NoWorld;
 	}
 	const float CurrentTime = World->GetTimeSeconds();
 	if (CurrentTime < NextFireTime)
 	{
-		return false;
+		return EWeaponFireAttemptResult::Cooldown;
 	}
 	if (!TryConsumeAmmo())
 	{
-		return false;
+		return EWeaponFireAttemptResult::Empty;
 	}
 	CommittedSpreadProfile = GetSpreadProfile(bOwnerAiming);
 	bHasCommittedSpreadProfile = true;
@@ -126,7 +131,7 @@ bool AWeaponRuntime::TryCommitFire()
 	CacheCommittedRecoil(CurrentTime);
 	NextFireTime = CurrentTime + GetEffectiveFireInterval();
 	OnFireCommitted.Broadcast();
-	return true;
+	return EWeaponFireAttemptResult::Committed;
 }
 float AWeaponRuntime::GetEffectiveFireInterval() const
 {
@@ -514,21 +519,21 @@ FWeaponPickupState AWeaponRuntime::CapturePickupRuntimeState(
 
 namespace
 {
- float NonNegative(float Value) { return FMath::IsFinite(Value) ? FMath::Max(0.0f, Value) : 0.0f; }
+	float NonNegative(float Value) { return FMath::IsFinite(Value) ? FMath::Max(0.0f, Value) : 0.0f; }
 }
 
 void AWeaponRuntime::OnConstruction(const FTransform& Transform)
 {
- Super::OnConstruction(Transform);
- ApplyDefinitionSettings();
+	Super::OnConstruction(Transform);
+	ApplyDefinitionSettings();
 }
 
 void AWeaponRuntime::PostInitializeComponents()
 {
- Super::PostInitializeComponents();
- ApplyDefinitionSettings();
- if (WeaponDefinition && !bInitialDefinitionApplied)
- {
+	Super::PostInitializeComponents();
+	ApplyDefinitionSettings();
+	if (WeaponDefinition && !bInitialDefinitionApplied)
+	{
   if (!bRestoredAmmo)
   {
    CurrentAmmo = FMath::Clamp(WeaponDefinition->InitialMagazineAmmo, 0, MagazineCapacity);
@@ -536,111 +541,111 @@ void AWeaponRuntime::PostInitializeComponents()
   }
   if (!bRestoredFireMode) CurrentFireMode = WeaponDefinition->DefaultFireMode;
   bInitialDefinitionApplied = true;
- }
+	}
 }
 
 void AWeaponRuntime::ApplyDefinitionSettings()
 {
- if (!WeaponDefinition) return;
- const UWeaponDefinitionData* D = WeaponDefinition;
- WeaponDisplayName = D->WeaponDisplayName;
- AllowedFireModes = D->AllowedFireModes;
- MagazineCapacity = FMath::Max(1, D->MagazineCapacity);
- FireInterval = FMath::Max(0.001f, NonNegative(D->FireInterval));
- BurstShotInterval = NonNegative(D->BurstShotInterval);
- RecoilData = D->RecoilData;
- StationarySpreadAngle = NonNegative(D->StationarySpreadAngle);
- MovingSpreadAngle = NonNegative(D->MovingSpreadAngle);
- JumpSpreadAngle = NonNegative(D->JumpSpreadAngle);
- SlowWalkSpreadAngle = NonNegative(D->SlowWalkSpreadAngle);
- MovementSpreadSpeedThreshold = NonNegative(D->MovementSpreadSpeedThreshold);
- bLockReloadAmountAtStart = D->bLockReloadAmountAtStart;
- bReloadOneRoundAtATime = D->bReloadOneRoundAtATime;
- bUseBatchReloadForFullEmptyReload = D->bUseBatchReloadForFullEmptyReload;
- // Existing Blueprint readers remain compatible; only the definition owns static data.
- if (FObjectPropertyBase* P = FindFProperty<FObjectPropertyBase>(GetClass(), TEXT("BallisticsData")))
- {
+	if (!WeaponDefinition) return;
+	const UWeaponDefinitionData* D = WeaponDefinition;
+	WeaponDisplayName = D->WeaponDisplayName;
+	AllowedFireModes = D->AllowedFireModes;
+	MagazineCapacity = FMath::Max(1, D->MagazineCapacity);
+	FireInterval = FMath::Max(0.001f, NonNegative(D->FireInterval));
+	BurstShotInterval = NonNegative(D->BurstShotInterval);
+	RecoilData = D->RecoilData;
+	StationarySpreadAngle = NonNegative(D->StationarySpreadAngle);
+	MovingSpreadAngle = NonNegative(D->MovingSpreadAngle);
+	JumpSpreadAngle = NonNegative(D->JumpSpreadAngle);
+	SlowWalkSpreadAngle = NonNegative(D->SlowWalkSpreadAngle);
+	MovementSpreadSpeedThreshold = NonNegative(D->MovementSpreadSpeedThreshold);
+	bLockReloadAmountAtStart = D->bLockReloadAmountAtStart;
+	bReloadOneRoundAtATime = D->bReloadOneRoundAtATime;
+	bUseBatchReloadForFullEmptyReload = D->bUseBatchReloadForFullEmptyReload;
+	// Existing Blueprint readers remain compatible; only the definition owns static data.
+	if (FObjectPropertyBase* P = FindFProperty<FObjectPropertyBase>(GetClass(), TEXT("BallisticsData")))
+	{
   if (P->PropertyClass == UWeaponBallisticsData::StaticClass()) P->SetObjectPropertyValue_InContainer(this, D->BallisticsData);
- }
- if (FNumericProperty* P = FindFProperty<FNumericProperty>(GetClass(), TEXT("BurstRecoveryInterval")); P && P->IsFloatingPoint())
+	}
+	if (FNumericProperty* P = FindFProperty<FNumericProperty>(GetClass(), TEXT("BurstRecoveryInterval")); P && P->IsFloatingPoint())
   P->SetFloatingPointPropertyValue(P->ContainerPtrToValuePtr<void>(this), NonNegative(D->BurstRecoveryInterval));
 }
 
 void AWeaponRuntime::CaptureDefinition(UWeaponDefinitionData* D) const
 {
- if (!D) return;
- D->bUseAimingSpread = WeaponDefinition && WeaponDefinition->bUseAimingSpread;
- D->AimingSpread = WeaponDefinition ? WeaponDefinition->AimingSpread : FWeaponSpreadProfile{};
- D->bIgnoreShotRecoilWhenAiming = WeaponDefinition && WeaponDefinition->bIgnoreShotRecoilWhenAiming;
- D->WeaponDisplayName = WeaponDisplayName;
- D->DefaultFireMode = CurrentFireMode;
- D->AllowedFireModes = AllowedFireModes;
- D->MagazineCapacity = MagazineCapacity;
- D->InitialMagazineAmmo = CurrentAmmo;
- D->InitialReserveAmmo = ReserveAmmo;
- D->FireInterval = FireInterval;
- D->BurstShotInterval = BurstShotInterval;
- D->StationarySpreadAngle = StationarySpreadAngle;
- D->MovingSpreadAngle = MovingSpreadAngle;
- D->JumpSpreadAngle = JumpSpreadAngle;
- D->SlowWalkSpreadAngle = SlowWalkSpreadAngle;
- D->MovementSpreadSpeedThreshold = MovementSpreadSpeedThreshold;
- D->bLockReloadAmountAtStart = bLockReloadAmountAtStart;
- D->bReloadOneRoundAtATime = bReloadOneRoundAtATime;
- D->bUseBatchReloadForFullEmptyReload = bUseBatchReloadForFullEmptyReload;
- if (RecoilData) { D->RecoilData = DuplicateObject<UWeaponRecoilData>(RecoilData, D); D->RecoilData->ClearFlags(RF_Standalone); D->RecoilData->SetFlags(RF_Public); }
- if (const FObjectPropertyBase* P = FindFProperty<FObjectPropertyBase>(GetClass(), TEXT("BallisticsData")))
+	if (!D) return;
+	D->bUseAimingSpread = WeaponDefinition && WeaponDefinition->bUseAimingSpread;
+	D->AimingSpread = WeaponDefinition ? WeaponDefinition->AimingSpread : FWeaponSpreadProfile{};
+	D->bIgnoreShotRecoilWhenAiming = WeaponDefinition && WeaponDefinition->bIgnoreShotRecoilWhenAiming;
+	D->WeaponDisplayName = WeaponDisplayName;
+	D->DefaultFireMode = CurrentFireMode;
+	D->AllowedFireModes = AllowedFireModes;
+	D->MagazineCapacity = MagazineCapacity;
+	D->InitialMagazineAmmo = CurrentAmmo;
+	D->InitialReserveAmmo = ReserveAmmo;
+	D->FireInterval = FireInterval;
+	D->BurstShotInterval = BurstShotInterval;
+	D->StationarySpreadAngle = StationarySpreadAngle;
+	D->MovingSpreadAngle = MovingSpreadAngle;
+	D->JumpSpreadAngle = JumpSpreadAngle;
+	D->SlowWalkSpreadAngle = SlowWalkSpreadAngle;
+	D->MovementSpreadSpeedThreshold = MovementSpreadSpeedThreshold;
+	D->bLockReloadAmountAtStart = bLockReloadAmountAtStart;
+	D->bReloadOneRoundAtATime = bReloadOneRoundAtATime;
+	D->bUseBatchReloadForFullEmptyReload = bUseBatchReloadForFullEmptyReload;
+	if (RecoilData) { D->RecoilData = DuplicateObject<UWeaponRecoilData>(RecoilData, D); D->RecoilData->ClearFlags(RF_Standalone); D->RecoilData->SetFlags(RF_Public); }
+	if (const FObjectPropertyBase* P = FindFProperty<FObjectPropertyBase>(GetClass(), TEXT("BallisticsData")))
   if (const UWeaponBallisticsData* B = Cast<UWeaponBallisticsData>(P->GetObjectPropertyValue_InContainer(this)))
    { D->BallisticsData = DuplicateObject<UWeaponBallisticsData>(B, D); D->BallisticsData->ClearFlags(RF_Standalone); D->BallisticsData->SetFlags(RF_Public); }
- if (const FNumericProperty* P = FindFProperty<FNumericProperty>(GetClass(), TEXT("BurstRecoveryInterval")); P && P->IsFloatingPoint())
+	if (const FNumericProperty* P = FindFProperty<FNumericProperty>(GetClass(), TEXT("BurstRecoveryInterval")); P && P->IsFloatingPoint())
   D->BurstRecoveryInterval = P->GetFloatingPointPropertyValue(P->ContainerPtrToValuePtr<void>(this));
 }
 
 float AWeaponRuntime::GetCurrentFiringSpread() const
 {
- return GetFiringSpreadForProfile(bOwnerAiming);
+	return GetFiringSpreadForProfile(bOwnerAiming);
 }
 
 FWeaponSpreadProfile AWeaponRuntime::GetSpreadProfile(bool bAiming) const
 {
- if (bAiming && WeaponDefinition && WeaponDefinition->bUseAimingSpread)
+	if (bAiming && WeaponDefinition && WeaponDefinition->bUseAimingSpread)
   return WeaponDefinition->AimingSpread;
- FWeaponSpreadProfile P;
- P.StationarySpreadAngle = StationarySpreadAngle;
- P.MovingSpreadAngle = MovingSpreadAngle;
- P.JumpSpreadAngle = JumpSpreadAngle;
- P.SlowWalkSpreadAngle = SlowWalkSpreadAngle;
- P.MovementSpreadSpeedThreshold = MovementSpreadSpeedThreshold;
- if (WeaponDefinition)
- {
+	FWeaponSpreadProfile P;
+	P.StationarySpreadAngle = StationarySpreadAngle;
+	P.MovingSpreadAngle = MovingSpreadAngle;
+	P.JumpSpreadAngle = JumpSpreadAngle;
+	P.SlowWalkSpreadAngle = SlowWalkSpreadAngle;
+	P.MovementSpreadSpeedThreshold = MovementSpreadSpeedThreshold;
+	if (WeaponDefinition)
+	{
   P.bUseFiringSpread = WeaponDefinition->bUseFiringSpread;
   P.SpreadPerShot = WeaponDefinition->SpreadPerShot;
   P.MaxFiringSpread = WeaponDefinition->MaxFiringSpread;
   P.SpreadRecoveryDelay = WeaponDefinition->SpreadRecoveryDelay;
   P.SpreadRecoverySpeed = WeaponDefinition->SpreadRecoverySpeed;
- }
- return P;
+	}
+	return P;
 }
 
 float AWeaponRuntime::GetFiringSpreadForProfile(bool bAiming) const
 {
- const bool bAimProfile = bAiming && WeaponDefinition && WeaponDefinition->bUseAimingSpread;
- const FWeaponSpreadProfile P = GetSpreadProfile(bAimProfile);
- const bool bHasShot = bAimProfile ? bHasAimSpreadShot : bHasSpreadShot;
- if (!P.bUseFiringSpread || !bHasShot || !GetWorld()) return 0.0f;
- return FFiringSpreadMath::Recover(bAimProfile ? AccumulatedAimFiringSpread : AccumulatedFiringSpread,
+	const bool bAimProfile = bAiming && WeaponDefinition && WeaponDefinition->bUseAimingSpread;
+	const FWeaponSpreadProfile P = GetSpreadProfile(bAimProfile);
+	const bool bHasShot = bAimProfile ? bHasAimSpreadShot : bHasSpreadShot;
+	if (!P.bUseFiringSpread || !bHasShot || !GetWorld()) return 0.0f;
+	return FFiringSpreadMath::Recover(bAimProfile ? AccumulatedAimFiringSpread : AccumulatedFiringSpread,
   GetWorld()->GetTimeSeconds() - (bAimProfile ? LastAimSpreadShotTime : LastSpreadShotTime),
   P.SpreadRecoveryDelay, P.SpreadRecoverySpeed, P.MaxFiringSpread);
 }
 
 void AWeaponRuntime::CacheCommittedFiringSpread(float SuccessfulShotTime)
 {
- CommittedFiringSpread = GetCurrentFiringSpread();
- // Advance both profiles on every accepted shot: changing aim cannot reset bloom.
- const float AimBefore = GetFiringSpreadForProfile(true);
- const float HipBefore = GetFiringSpreadForProfile(false);
- for (int32 Mode = 0; Mode < 2; ++Mode)
- {
+	CommittedFiringSpread = GetCurrentFiringSpread();
+	// Advance both profiles on every accepted shot: changing aim cannot reset bloom.
+	const float AimBefore = GetFiringSpreadForProfile(true);
+	const float HipBefore = GetFiringSpreadForProfile(false);
+	for (int32 Mode = 0; Mode < 2; ++Mode)
+	{
   const FWeaponSpreadProfile P = GetSpreadProfile(Mode == 1);
   float& Accumulated = Mode == 1 ? AccumulatedAimFiringSpread : AccumulatedFiringSpread;
   float& LastTime = Mode == 1 ? LastAimSpreadShotTime : LastSpreadShotTime;
@@ -649,5 +654,5 @@ void AWeaponRuntime::CacheCommittedFiringSpread(float SuccessfulShotTime)
    ? FFiringSpreadMath::AddShot(Mode == 1 ? AimBefore : HipBefore, P.SpreadPerShot, P.MaxFiringSpread) : 0.0f;
   LastTime = SuccessfulShotTime;
   bHasShot = P.bUseFiringSpread;
- }
+	}
 }

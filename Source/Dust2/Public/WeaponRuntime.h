@@ -10,6 +10,16 @@
 
 class UWeaponDefinitionData;
 
+// W06: immediate result of the same authoritative fire attempt; no cached status.
+UENUM(BlueprintType)
+enum class EWeaponFireAttemptResult : uint8
+{
+	Committed UMETA(DisplayName = "成功开火"),
+	Reloading UMETA(DisplayName = "正在换弹"),
+	NoWorld UMETA(DisplayName = "无有效世界"),
+	Cooldown UMETA(DisplayName = "射速冷却"),
+	Empty UMETA(DisplayName = "弹匣为空")
+};
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnFireCommitted);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnReloadStarted);
 USTRUCT(BlueprintType)
@@ -83,6 +93,8 @@ public:
 	void RestoreAmmo(int32 NewCurrentAmmo, int32 NewReserveAmmo);
 	UFUNCTION(BlueprintCallable, Category = "Fire")
 	bool TryCommitFire();
+	UFUNCTION(BlueprintCallable, Category = "Fire", meta = (DisplayName = "尝试提交开火（返回原因）"))
+	EWeaponFireAttemptResult TryCommitFireWithResult();
 	UFUNCTION(BlueprintPure, Category = "Fire")
 	float GetEffectiveFireInterval() const;
 	UPROPERTY(BlueprintAssignable, Category = "Fire")
