@@ -8,6 +8,7 @@
 #include "Components/ChildActorComponent.h"
 #include "Templates/UnrealTemplate.h"
 #include "WeaponPresentationComponent.h"
+#include "DustMovementAudioComponent.h"
 
 ADust2PlayerCharacter::ADust2PlayerCharacter()
 {
@@ -16,6 +17,17 @@ ADust2PlayerCharacter::ADust2PlayerCharacter()
 	MaxHealth = 100.0f;
 	CurrentHealth = 30.0f;
 	bDeathRequested = false;
+
+	MovementAudio = CreateDefaultSubobject<UDustMovementAudioComponent>(TEXT("MovementAudio"));
+}
+
+void ADust2PlayerCharacter::OnJumped_Implementation()
+{
+	Super::OnJumped_Implementation();
+	if (MovementAudio)
+	{
+		MovementAudio->NotifyJumped();
+	}
 }
 float ADust2PlayerCharacter::GetMaxHealth() const
 {
@@ -47,7 +59,13 @@ bool ADust2PlayerCharacter::ApplyDamage(float Amount, bool& bDiedNow)
 	{
 		bDeathRequested = true;
 		CancelAim();
+		bFireInputHeld = false;
+		ClearPendingSprintFire();
 		ClearGaitIntent();
+		if (MovementAudio)
+		{
+			MovementAudio->SetMovementAudioEnabled(false);
+		}
 	}
 	return bHealthChanged;
 }
@@ -67,9 +85,38 @@ bool ADust2PlayerCharacter::ApplyHeal(float Amount)
 void ADust2PlayerCharacter::RestoreHealth(float SavedHealth)
 {
 	CancelAim();
+	bFireInputHeld = false;
+	ClearPendingSprintFire();
 	ClearGaitIntent();
 	CurrentHealth = FMath::Clamp(SavedHealth, 0.0f, MaxHealth);
 	bDeathRequested = false;
+	if (MovementAudio)
+	{
+		// While disabled the stride accumulator is held at half a stride, so no stale step fires on revive.
+		MovementAudio->SetMovementAudioEnabled(!IsDead());
+	}
+}
+
+void ADust2PlayerCharacter::ReportSprintExitPresentationReady(bool bReady)
+{
+	if (!bReady || IsDead() || CurrentGait == EDustMovementGait::Run)
+	{
+		bSprintExitPresentationReady = false;
+		return;
+	}
+	if (bSprintExitPresentationReady)
+	{
+		return;
+	}
+	bSprintExitPresentationReady = true;
+	SchedulePendingSprintActionFlush();
+}
+
+bool ADust2PlayerCharacter::CanProcessSprintAction() const
+{
+	return !IsDead() &&
+		CurrentGait != EDustMovementGait::Run &&
+		bSprintExitPresentationReady;
 }
 
 void ADust2PlayerCharacter::SetSprintHeld(bool bHeld)
@@ -84,6 +131,7 @@ void ADust2PlayerCharacter::SetSprintHeld(bool bHeld)
 		LastPressedGaitModifier = EDustGaitModifier::Sprint;
 	}
 	ResolveGaitIntent();
+	UpdateSprintDirectionWatch();
 }
 
 void ADust2PlayerCharacter::SetSlowWalkHeld(bool bHeld)
@@ -107,18 +155,22 @@ void ADust2PlayerCharacter::ClearGaitIntent()
 	bSprintHeld = false;
 	bSlowWalkHeld = false;
 	LastPressedGaitModifier = EDustGaitModifier::None;
+	UpdateSprintDirectionWatch();
 	if (!bHadHold && !bWasNotWalk)
 	{
 		return;
 	}
-	CurrentGait = EDustMovementGait::Walk;
-	ReceiveGaitChanged(CurrentGait);
+	bSprintExitPresentationReady = false;
+	ApplyGait(EDustMovementGait::Walk);
 }
 
 void ADust2PlayerCharacter::ResolveGaitIntent()
 {
 	EDustMovementGait Desired = EDustMovementGait::Walk;
-	if (bSprintHeld && bSlowWalkHeld)
+	// A pending or active aim, like a pending/held shot, keeps the player out of Run.
+	const bool bSprintAllowed = bSprintHeld && !IsSprintBlockedForFire()
+		&& !bPendingSprintAim && !bNativeAiming && IsSprintDirectionAllowed();
+	if (bSprintAllowed && bSlowWalkHeld)
 	{
 		Desired = (LastPressedGaitModifier == EDustGaitModifier::SlowWalk)
 			? EDustMovementGait::SlowWalk
@@ -128,23 +180,78 @@ void ADust2PlayerCharacter::ResolveGaitIntent()
 	{
 		Desired = EDustMovementGait::SlowWalk;
 	}
-	else if (bSprintHeld)
+	else if (bSprintAllowed)
 	{
 		Desired = EDustMovementGait::Run;
 	}
-	else
+	else if (!bSprintHeld && !bSlowWalkHeld)
 	{
+		// A temporary action lock is not an input release. Preserve the
+		// last-pressed modifier until both gait inputs are actually released.
 		LastPressedGaitModifier = EDustGaitModifier::None;
 	}
 
+	// Invalidate old animation reports whenever Run is active or is being exited.
+	// A later post-evaluation report must prove the sprint pose weight reached zero.
+	if (Desired == EDustMovementGait::Run ||
+		CurrentGait == EDustMovementGait::Run)
+	{
+		bSprintExitPresentationReady = false;
+	}
 	if (CurrentGait == Desired)
 	{
 		return;
 	}
-	CurrentGait = Desired;
-	ReceiveGaitChanged(CurrentGait);
+	ApplyGait(Desired);
 }
 
+void ADust2PlayerCharacter::ApplyGait(EDustMovementGait NewGait)
+{
+	CurrentGait = NewGait;
+	if (MovementAudio)
+	{
+		MovementAudio->SetGait(NewGait);
+	}
+	ReceiveGaitChanged(NewGait);
+}
+
+bool ADust2PlayerCharacter::IsSprintDirectionAllowed() const
+{
+	// Run only while moving forward (or diagonally forward). Backpedal, pure strafe
+	// and no input all resolve to Walk while Shift stays held.
+	FVector Input = GetLastMovementInputVector();
+	Input.Z = 0.0f;
+	FVector Forward = GetActorForwardVector();
+	Forward.Z = 0.0f;
+	if (!Input.Normalize() || !Forward.Normalize())
+	{
+		return false;
+	}
+	return FVector::DotProduct(Input, Forward) >= SprintMinForwardInput;
+}
+
+void ADust2PlayerCharacter::UpdateSprintDirectionWatch()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	FTimerManager& Timers = World->GetTimerManager();
+	if (bSprintHeld && !IsDead())
+	{
+		if (!Timers.IsTimerActive(SprintDirectionTimerHandle))
+		{
+			// Direction changes without any gait input event, so re-resolve while Shift is held.
+			Timers.SetTimer(SprintDirectionTimerHandle, this,
+				&ADust2PlayerCharacter::ResolveGaitIntent, 0.05f, true);
+		}
+	}
+	else
+	{
+		Timers.ClearTimer(SprintDirectionTimerHandle);
+	}
+}
 bool ADust2PlayerCharacter::CanStartReloadRequest_Implementation(
 	AWeaponRuntime* FormalWeapon) const
 {
@@ -369,6 +476,14 @@ void ADust2PlayerCharacter::RefreshAimedWeaponPickup()
 void ADust2PlayerCharacter::EndPlay(
     const EEndPlayReason::Type EndPlayReason)
 {
+    bFireInputHeld = false;
+    ClearPendingSprintFire();
+    ClearPendingSprintAim();
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(PendingSprintActionFlushTimerHandle);
+        World->GetTimerManager().ClearTimer(SprintDirectionTimerHandle);
+    }
     UnbindInventoryBridge();
     if (UWorld* World = GetWorld())
     {
@@ -441,14 +556,17 @@ void ADust2PlayerCharacter::HandleInventoryBridgeChanged(
     {
         BridgedInventory->SyncLegacyWeaponReferences();
     }
+    ResolveGaitIntent();
 }
 
 void ADust2PlayerCharacter::HandleInventoryBridgeBeforeChange(
     AWeaponRuntime* OldWeapon)
 {
+    ClearPendingSprintFire();
     CancelAim();
     ObserveAimWeapon(nullptr);
     ReceiveBeforeInventoryWeaponChange(OldWeapon);
+    ResolveGaitIntent();
 }
 
 void ADust2PlayerCharacter::HandleInventoryBridgeEquipped(
@@ -495,6 +613,7 @@ bool ADust2PlayerCharacter::InitializeAimState(
     }
     AimPresentation = Presentation;
     ObserveAimWeapon(BridgedInventory->GetCurrentWeaponNative());
+    ResolveGaitIntent();
     return true;
 }
 
@@ -505,6 +624,8 @@ bool ADust2PlayerCharacter::SetAimInputPressed(
     {
         bAimInputHeld = false;
         CancelAim();
+        // Do this after CancelAim; it intentionally never resolves gait itself.
+        ResolveGaitIntent();
         return false;
     }
     if (bAimInputHeld)
@@ -525,12 +646,23 @@ bool ADust2PlayerCharacter::SetAimInputPressed(
         return false;
     }
     ObserveAimWeapon(Weapon);
+    if (CurrentGait == EDustMovementGait::Run ||
+        !CanProcessSprintAction())
+    {
+        bPendingSprintAim = true;
+        PendingSprintAimWeapon = Weapon;
+        // Store the request before resolving gait so the same call cannot re-enter Run.
+        ResolveGaitIntent();
+        return false;
+    }
     SetNativeAimState(true);
+    ResolveGaitIntent();
     return bNativeAiming;
 }
 
 void ADust2PlayerCharacter::CancelAim()
 {
+    ClearPendingSprintAim();
     SetNativeAimState(false);
 }
 
@@ -581,9 +713,11 @@ void ADust2PlayerCharacter::ObserveAimWeapon(AWeaponRuntime* Weapon)
 
 void ADust2PlayerCharacter::HandleAimReloadStarted()
 {
+    ClearPendingSprintFire();
     if (!bKeepAimDuringReload)
     {
         CancelAim();
+        ResolveGaitIntent();
     }
 }
 
@@ -593,6 +727,7 @@ void ADust2PlayerCharacter::HandleAimWeaponDestroyed(AActor* DestroyedActor)
     {
         CancelAim();
         ObserveAimWeapon(nullptr);
+        ResolveGaitIntent();
     }
 }
 bool ADust2PlayerCharacter::HasConsumedPickupInitialDraw_Implementation(
@@ -630,4 +765,161 @@ bool ADust2PlayerCharacter::TryBuildDropSnapshotNative(
         HasConsumedPickupInitialDraw(CurrentWeapon));
 
     return OutState.bHasSavedState;
+}
+
+// ---- W07 G10: fire while sprinting ------------------------------------------
+
+bool ADust2PlayerCharacter::NotifyFirePressed()
+{
+    if (bFireInputHeld)
+    {
+        // Duplicate Started without Completed: never submit a second first shot.
+        return false;
+    }
+    bFireInputHeld = true;
+    if (IsDead())
+    {
+        return false;
+    }
+    // Logical Walk alone is insufficient: wait for the animation's explicit
+    // zero sprint-weight report after a recent Run.
+    if (CanProcessSprintAction())
+    {
+        return true;
+    }
+
+    UWorld* World = GetWorld();
+    AWeaponRuntime* Weapon = IsValid(BridgedInventory)
+        ? BridgedInventory->GetCurrentWeaponNative() : nullptr;
+    if (!World || !IsValid(Weapon))
+    {
+        ResolveGaitIntent();
+        return false;
+    }
+
+    bPendingSprintFire = true;
+    PendingSprintFireWeapon = Weapon;
+    PendingSprintFireReadyTime = World->GetTimeSeconds() + SprintExitFireDelay;
+    // Fire is now held, so this leaves Run immediately.
+    ResolveGaitIntent();
+    TryFlushPendingSprintFire();
+    if (bPendingSprintFire && !World->GetTimerManager().IsTimerActive(PendingSprintFireTimerHandle))
+    {
+        World->GetTimerManager().SetTimer(PendingSprintFireTimerHandle, this,
+            &ADust2PlayerCharacter::FlushPendingSprintActions, 0.02f, true);
+    }
+    return false;
+}
+
+void ADust2PlayerCharacter::NotifyFireReleased()
+{
+    bFireInputHeld = false;
+    ClearPendingSprintFire();
+    // May resume Run if Shift is still held.
+    ResolveGaitIntent();
+}
+
+void ADust2PlayerCharacter::ClearPendingSprintFire()
+{
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(PendingSprintFireTimerHandle);
+    }
+    if (!bPendingSprintFire)
+    {
+        return;
+    }
+    bPendingSprintFire = false;
+    PendingSprintFireWeapon.Reset();
+    PendingSprintFireReadyTime = 0.0f;
+}
+
+void ADust2PlayerCharacter::TryFlushPendingSprintFire()
+{
+    if (!bPendingSprintFire)
+    {
+        ClearPendingSprintFire();
+        return;
+    }
+    UWorld* World = GetWorld();
+    AWeaponRuntime* Weapon = IsValid(BridgedInventory)
+        ? BridgedInventory->GetCurrentWeaponNative() : nullptr;
+    if (!World || IsDead() || !bFireInputHeld || !IsValid(Weapon) ||
+        Weapon != PendingSprintFireWeapon.Get())
+    {
+        ClearPendingSprintFire();
+        return;
+    }
+    // Not ready yet: keep the single cached request and wait.
+    if (!CanProcessSprintAction() ||
+        BridgedInventory->IsInventoryBusy() || Weapon->IsReloading() ||
+        World->GetTimeSeconds() < PendingSprintFireReadyTime)
+    {
+        return;
+    }
+    // Consume before handing off so the first shot is submitted exactly once.
+    // Ammo / cooldown / reload are re-checked by RequestFire -> TryCommitFireWithResult.
+    ClearPendingSprintFire();
+    ReceivePendingSprintFireReady(Weapon);
+}
+
+void ADust2PlayerCharacter::ClearPendingSprintAim()
+{
+    bPendingSprintAim = false;
+    PendingSprintAimWeapon.Reset();
+}
+
+void ADust2PlayerCharacter::TryFlushPendingSprintAim()
+{
+    if (!bPendingSprintAim)
+    {
+        return;
+    }
+
+    UWeaponPresentationComponent* Presentation = AimPresentation.Get();
+    AWeaponRuntime* Weapon = IsValid(BridgedInventory)
+        ? BridgedInventory->GetCurrentWeaponNative() : nullptr;
+    if (!bAimInputHeld || IsDead() || !IsValid(BridgedInventory) ||
+        BridgedInventory->IsInventoryBusy() || !IsValid(Presentation) ||
+        !IsValid(Weapon) || Weapon != PendingSprintAimWeapon.Get() ||
+        (Weapon->IsReloading() && !bKeepAimDuringReload) ||
+        !Presentation->CanStartReloadPresentation(Weapon, false))
+    {
+        ClearPendingSprintAim();
+        ResolveGaitIntent();
+        return;
+    }
+    if (!CanProcessSprintAction())
+    {
+        return;
+    }
+
+    // Consume before Blueprint notifications, which may re-enter player logic.
+    ClearPendingSprintAim();
+    ObserveAimWeapon(Weapon);
+    SetNativeAimState(true);
+    ResolveGaitIntent();
+}
+
+void ADust2PlayerCharacter::FlushPendingSprintActions()
+{
+    // Each path validates its captured request before checking pose readiness.
+    // Do not skip invalid-weapon cleanup while the animation gate is closed.
+    // Enter ADS before dispatching a simultaneously pending shot.
+    TryFlushPendingSprintAim();
+    TryFlushPendingSprintFire();
+}
+
+void ADust2PlayerCharacter::SchedulePendingSprintActionFlush()
+{
+    if ((!bPendingSprintAim && !bPendingSprintFire) ||
+        !GetWorld() ||
+        GetWorld()->GetTimerManager().IsTimerActive(
+            PendingSprintActionFlushTimerHandle))
+    {
+        return;
+    }
+    PendingSprintActionFlushTimerHandle =
+        GetWorld()->GetTimerManager().SetTimerForNextTick(
+            this, &ADust2PlayerCharacter::FlushPendingSprintActions);
 }

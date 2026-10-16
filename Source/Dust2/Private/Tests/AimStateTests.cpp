@@ -74,6 +74,8 @@ namespace
         void Release() { Player->SetAimInputPressed(false, false); }
         bool Press(bool bSwitching = false)
         { return Player->SetAimInputPressed(true, bSwitching); }
+        void Tick(float DeltaSeconds = 0.001f)
+        { ++GFrameCounter; World->Tick(LEVELTICK_All, DeltaSeconds); }
     };
 
     void SetAimTestInt(AWeaponRuntime* Weapon, FName Name, int32 Value)
@@ -538,4 +540,196 @@ bool FAimedRecoilCleanupTest::RunTest(const FString& Parameters)
     F.Player->CancelAim();
     return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSprintActionExitGateTest,
+    "Dust2.Gait.SprintActionExitGateAndPendingAim",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSprintActionExitGateTest::RunTest(const FString& Parameters)
+{
+    TGuardValue<uint64> FrameGuard(GFrameCounter, GFrameCounter);
+    AddExpectedMessage(TEXT("Inventory mirror sync rejected"), ELogVerbosity::Warning,
+        EAutomationExpectedMessageFlags::Contains, 0);
+    FAimTestWorld F;
+    if (!TestTrue(TEXT("fixture ready"), F.bReady)) return false;
+
+    // A report from the previous Walk pose cannot survive a new Run.
+    F.Player->ReportSprintExitPresentationReady(false);
+    F.Player->SetSprintHeld(true);
+    TestTrue(TEXT("sprint intent enters Run"), F.Player->GetCurrentGait() == EDustMovementGait::Run);
+
+    TestFalse(TEXT("aim press during Run is deferred"), F.Press());
+    TestTrue(TEXT("pending aim is visible"), F.Player->HasPendingSprintAim());
+    TestFalse(TEXT("deferred aim has not switched ADS"), F.Player->IsAiming());
+    TestTrue(TEXT("pending aim exits logical Run"), F.Player->GetCurrentGait() == EDustMovementGait::Walk);
+    TestFalse(TEXT("fire also waits during the same exit"), F.Player->NotifyFirePressed());
+    TestTrue(TEXT("one fire request is pending beside aim"), F.Player->HasPendingSprintFire());
+    F.Player->ReportSprintExitPresentationReady(false);
+    F.Tick();
+    TestTrue(TEXT("false animation report keeps aim pending"), F.Player->HasPendingSprintAim());
+    TestTrue(TEXT("false animation report keeps fire pending"), F.Player->HasPendingSprintFire());
+    TestFalse(TEXT("false report keeps ADS off"), F.Player->IsAiming());
+
+    F.Release();
+    TestFalse(TEXT("aim release cancels only pending aim"), F.Player->HasPendingSprintAim());
+    TestTrue(TEXT("held fire still blocks Run"), F.Player->HasPendingSprintFire());
+    TestEqual(TEXT("releasing one action does not resume Run while the other is pending"),
+        F.Player->GetCurrentGait(), EDustMovementGait::Walk);
+    F.Player->NotifyFireReleased();
+    TestFalse(TEXT("fire release cancels its pending shot"), F.Player->HasPendingSprintFire());
+    TestEqual(TEXT("releasing the final action restores held sprint"),
+        F.Player->GetCurrentGait(), EDustMovementGait::Run);
+    F.Player->ReportSprintExitPresentationReady(true);
+    TestFalse(TEXT("stale true report while Run is ignored"), F.Player->CanProcessSprintAction());
+
+    // Release Run, then verify the ready notification is deferred until next tick.
+    F.Player->SetSprintHeld(false);
+    F.Player->ReportSprintExitPresentationReady(false);
+    TestFalse(TEXT("aim is pending while logical Walk still has sprint pose"), F.Press());
+    TestTrue(TEXT("walk exit holds a pending aim"), F.Player->HasPendingSprintAim());
+    F.Player->ReportSprintExitPresentationReady(true);
+    TestFalse(TEXT("post-evaluate report does not activate aim inline"), F.Player->IsAiming());
+    F.Tick();
+    TestTrue(TEXT("next game-thread tick consumes aim once"), F.Player->IsAiming());
+    TestFalse(TEXT("consumed aim no longer pending"), F.Player->HasPendingSprintAim());
+    F.Player->ReportSprintExitPresentationReady(true);
+    F.Tick();
+    TestTrue(TEXT("repeated ready reports do not duplicate the aim transition"), F.Player->IsAiming());
+
+    F.Player->SetSprintHeld(true);
+    TestTrue(TEXT("held sprint stays suppressed while aiming"), F.Player->GetCurrentGait() == EDustMovementGait::Walk);
+    F.Release();
+    TestTrue(TEXT("aim release restores held sprint"), F.Player->GetCurrentGait() == EDustMovementGait::Run);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSprintFireAnimationExitGateTest,
+    "Dust2.Gait.SprintFireWaitsForAnimationExit",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSprintFireAnimationExitGateTest::RunTest(const FString& Parameters)
+{
+    TGuardValue<uint64> FrameGuard(GFrameCounter, GFrameCounter);
+    AddExpectedMessage(TEXT("Inventory mirror sync rejected"), ELogVerbosity::Warning,
+        EAutomationExpectedMessageFlags::Contains, 0);
+    FAimTestWorld F;
+    if (!TestTrue(TEXT("fixture ready"), F.bReady)) return false;
+    F.Player->ReportSprintExitPresentationReady(false);
+    F.Player->SetSprintHeld(true);
+    TestFalse(TEXT("Run fire is cached"), F.Player->NotifyFirePressed());
+    TestTrue(TEXT("one cached shot exists"), F.Player->HasPendingSprintFire());
+    TestTrue(TEXT("fire leaves Run immediately"), F.Player->GetCurrentGait() == EDustMovementGait::Walk);
+
+    F.Player->ReportSprintExitPresentationReady(false);
+    F.Tick();
+    TestTrue(TEXT("false report does not flush shot"), F.Player->HasPendingSprintFire());
+    TestFalse(TEXT("false report keeps common gate closed"), F.Player->CanProcessSprintAction());
+
+    // Releasing the fire input follows Rule A and returns to Run if Shift remains held.
+    F.Player->NotifyFireReleased();
+    TestFalse(TEXT("release cancels cached shot"), F.Player->HasPendingSprintFire());
+    TestTrue(TEXT("release resumes held sprint"), F.Player->GetCurrentGait() == EDustMovementGait::Run);
+
+    // A later press after logical Walk must still wait for the actual exit report.
+    F.Player->SetSprintHeld(false);
+    F.Player->ReportSprintExitPresentationReady(false);
+    TestFalse(TEXT("logical Walk with sprint pose still caches fire"), F.Player->NotifyFirePressed());
+    TestTrue(TEXT("walk-state shot remains pending"), F.Player->HasPendingSprintFire());
+    F.Player->ReportSprintExitPresentationReady(false);
+    F.Tick();
+    TestTrue(TEXT("animation has not exited yet"), F.Player->HasPendingSprintFire());
+    F.Player->ReportSprintExitPresentationReady(true);
+    TestTrue(TEXT("ready is processed on the next tick"), F.Player->HasPendingSprintFire());
+    F.Tick();
+    TestFalse(TEXT("ready consumes the cached request once"), F.Player->HasPendingSprintFire());
+    TestTrue(TEXT("shared gate opens only after report true"), F.Player->CanProcessSprintAction());
+    F.Player->ReportSprintExitPresentationReady(true);
+    F.Tick();
+    TestFalse(TEXT("repeated true reports cannot consume again"), F.Player->HasPendingSprintFire());
+    F.Player->NotifyFireReleased();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPendingSprintAimLifecycleTest,
+    "Dust2.Gait.PendingAimLifecycleAndReloadPolicy",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FPendingSprintAimLifecycleTest::RunTest(const FString& Parameters)
+{
+    TGuardValue<uint64> FrameGuard(GFrameCounter, GFrameCounter);
+    AddExpectedMessage(TEXT("Inventory mirror sync rejected"), ELogVerbosity::Warning,
+        EAutomationExpectedMessageFlags::Contains, 0);
+    {
+        FAimTestWorld F;
+        if (!TestTrue(TEXT("switch fixture ready"), F.bReady)) return false;
+        F.Player->ReportSprintExitPresentationReady(false);
+        F.Player->SetSprintHeld(true);
+        TestFalse(TEXT("valid aim can be deferred"), F.Press());
+        TestTrue(TEXT("pending aim captured before switch"), F.Player->HasPendingSprintAim());
+        TestTrue(TEXT("switch accepted"), F.Inventory->TrySwitchWeaponNative());
+        TestFalse(TEXT("weapon switch cancels pending aim"), F.Player->HasPendingSprintAim());
+        TestFalse(TEXT("switch cannot activate stale ADS"), F.Player->IsAiming());
+    }
+    {
+        FAimTestWorld F;
+        if (!TestTrue(TEXT("death fixture ready"), F.bReady)) return false;
+        F.Player->ReportSprintExitPresentationReady(false);
+        F.Player->SetSprintHeld(true);
+        TestFalse(TEXT("valid aim can be deferred before death"), F.Press());
+        bool bDiedNow = false;
+        F.Player->ApplyDamage(100.0f, bDiedNow);
+        TestTrue(TEXT("death occurred"), bDiedNow);
+        TestFalse(TEXT("death clears pending aim"), F.Player->HasPendingSprintAim());
+        F.Player->RestoreHealth(100.0f);
+        TestFalse(TEXT("restore does not resurrect pending aim"), F.Player->HasPendingSprintAim());
+    }
+    {
+        FAimTestWorld F;
+        if (!TestTrue(TEXT("destroy fixture ready"), F.bReady)) return false;
+        F.Player->ReportSprintExitPresentationReady(false);
+        F.Player->SetSprintHeld(true);
+        TestFalse(TEXT("valid aim can be deferred before destroy"), F.Press());
+        F.Weapon1->Destroy();
+        TestFalse(TEXT("destroyed captured weapon clears pending aim"), F.Player->HasPendingSprintAim());
+        TestFalse(TEXT("destroyed weapon cannot activate ADS"), F.Player->IsAiming());
+    }
+    {
+        FAimTestWorld F;
+        if (!TestTrue(TEXT("reload fixture ready"), F.bReady)) return false;
+        SetAimTestInt(F.Weapon1, TEXT("MagazineCapacity"), 10);
+        SetAimTestInt(F.Weapon1, TEXT("CurrentAmmo"), 4);
+        SetAimTestInt(F.Weapon1, TEXT("ReserveAmmo"), 20);
+        F.Player->ReportSprintExitPresentationReady(false);
+        F.Player->SetSprintHeld(true);
+        TestFalse(TEXT("aim press is pending during Run"), F.Press());
+        TestTrue(TEXT("A policy reload starts"), F.Weapon1->TryStartReload());
+        TestTrue(TEXT("A policy keeps the pending request eligible"), F.Player->HasPendingSprintAim());
+        F.Player->ReportSprintExitPresentationReady(true);
+        F.Tick();
+        TestTrue(TEXT("A policy can enter ADS after pose exit while reload remains active"), F.Player->IsAiming());
+        TestTrue(TEXT("reload remains authoritative"), F.Weapon1->IsReloading());
+    }
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSprintModifierPriorityDuringActionLockTest,
+    "Dust2.Gait.SprintModifierPrioritySurvivesActionLock",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSprintModifierPriorityDuringActionLockTest::RunTest(const FString& Parameters)
+{
+    AddExpectedMessage(TEXT("Inventory mirror sync rejected"), ELogVerbosity::Warning,
+        EAutomationExpectedMessageFlags::Contains, 0);
+    FAimTestWorld F;
+    if (!TestTrue(TEXT("fixture ready"), F.bReady)) return false;
+    F.Player->SetSlowWalkHeld(true);
+    F.Player->SetSprintHeld(true); // Sprint is now the most recently pressed modifier.
+    TestTrue(TEXT("sprint wins before the action lock"), F.Player->GetCurrentGait() == EDustMovementGait::Run);
+    TestFalse(TEXT("aim waits for the sprint pose to exit"), F.Press());
+    TestTrue(TEXT("action lock suppresses Run"), F.Player->GetCurrentGait() == EDustMovementGait::SlowWalk);
+    F.Release();
+    TestEqual(TEXT("removing the action lock restores last-pressed Sprint priority"),
+        F.Player->GetCurrentGait(), EDustMovementGait::Run);
+    F.Player->SetSprintHeld(false);
+    TestTrue(TEXT("releasing Sprint exposes held SlowWalk"), F.Player->GetCurrentGait() == EDustMovementGait::SlowWalk);
+    F.Player->SetSlowWalkHeld(false);
+    TestTrue(TEXT("releasing both modifiers returns Walk"), F.Player->GetCurrentGait() == EDustMovementGait::Walk);
+    return true;
+}
 #endif
+

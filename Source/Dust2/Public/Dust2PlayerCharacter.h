@@ -6,22 +6,17 @@
 #include "GameFramework/Character.h"
 #include "TimerManager.h"
 #include "WeaponRuntime.h"
+#include "DustMovementGait.h"
 #include "Dust2PlayerCharacter.generated.h"
 class AWeaponRuntime;
 class UWeaponInventoryComponent;
 class UChildActorComponent;
 class UCameraRecoilRecoveryComponent;
 class UWeaponPresentationComponent;
+class UDustMovementAudioComponent;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnAimedWeaponPickupChanged, AActor*, AimedPickup);
 
-UENUM(BlueprintType)
-enum class EDustMovementGait : uint8
-{
-	Walk UMETA(DisplayName = "Walk"),
-	Run UMETA(DisplayName = "Run"),
-	SlowWalk UMETA(DisplayName = "SlowWalk")
-};
 
 UCLASS()
 class DUST2_API ADust2PlayerCharacter : public ACharacter
@@ -30,6 +25,9 @@ class DUST2_API ADust2PlayerCharacter : public ACharacter
 
 public:
 	ADust2PlayerCharacter();
+	virtual void OnJumped_Implementation() override;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Audio")
+	TObjectPtr<UDustMovementAudioComponent> MovementAudio;
 	// Explicit opt-in after the Blueprint camera/HUD/animation setup is ready.
 	UFUNCTION(BlueprintCallable, Category = "Weapon|Aim")
 	bool InitializeAimState(UWeaponPresentationComponent* Presentation);
@@ -45,6 +43,8 @@ public:
 	bool IsAimInputHeld() const { return bAimInputHeld; }
 	UFUNCTION(BlueprintImplementableEvent, Category = "Weapon|Aim")
 	void ReceiveAimStateChanged(bool bAiming);
+	UFUNCTION(BlueprintPure, Category = "Weapon|Aim")
+	bool HasPendingSprintAim() const { return bPendingSprintAim; }
 
 	// Call on Started / Completed / Canceled, not every Triggered frame.
 	UFUNCTION(BlueprintCallable, Category = "Movement|Gait")
@@ -59,6 +59,39 @@ public:
 	bool IsSlowWalking() const { return CurrentGait == EDustMovementGait::SlowWalk; }
 	UFUNCTION(BlueprintImplementableEvent, Category = "Movement|Gait")
 	void ReceiveGaitChanged(EDustMovementGait NewGait);
+	// The animation instance reports the evaluated sprint pose weight.
+	// True is accepted only after the logical gait has left Run.
+	UFUNCTION(BlueprintCallable, Category = "Movement|Gait")
+	void ReportSprintExitPresentationReady(bool bReady);
+	// Use as the common gate before every direct or automatic fire entry.
+	UFUNCTION(BlueprintPure, Category = "Movement|Gait")
+	bool CanProcessSprintAction() const;
+
+	// W07 G10: fire while sprinting. Call on IA Fire Started only.
+	// Returns true when the shared sprint-pose exit gate is open; the caller
+	// may run its normal fire chain. Otherwise a valid press is cached until
+	// the animation reports zero sprint weight, or rejected.
+	UFUNCTION(BlueprintCallable, Category = "Weapon|Fire")
+	bool NotifyFirePressed();
+	// Call on IA Fire Completed / Canceled. Rule A: drops any cached shot.
+	UFUNCTION(BlueprintCallable, Category = "Weapon|Fire")
+	void NotifyFireReleased();
+	UFUNCTION(BlueprintCallable, Category = "Weapon|Fire")
+	void ClearPendingSprintFire();
+	UFUNCTION(BlueprintPure, Category = "Weapon|Fire")
+	bool HasPendingSprintFire() const { return bPendingSprintFire; }
+	UFUNCTION(BlueprintPure, Category = "Movement|Gait")
+	bool IsSprintBlockedForFire() const { return bPendingSprintFire || bFireInputHeld; }
+	// Fired once per cached press, after the animation exit gate and weapon are ready.
+	// Wire it to the same chain IA Fire Started uses when NotifyFirePressed is true.
+	UFUNCTION(BlueprintImplementableEvent, Category = "Weapon|Fire")
+	void ReceivePendingSprintFireReady(AWeaponRuntime* Weapon);
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Fire",
+		meta = (ClampMin = "0.0", ToolTip = "Optional minimum wait measured from the queued press. The explicit sprint-pose exit report and weapon readiness are also required."))
+	float SprintExitFireDelay = 0.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Gait",
+		meta = (ClampMin = "-1.0", ClampMax = "1.0", ToolTip = "Run requires dot(move input, actor forward) >= this. 0.7 is about 45 degrees either side of forward. Below it, Shift stays held but the gait is Walk."))
+	float SprintMinForwardInput = 0.7f;
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Aim",
 		meta = (DisplayName = "换弹时保持瞄准",
 			ToolTip = "已在瞄准时开始换弹，保留瞄准视野和准星状态；松开右键仍退出。"))
@@ -166,6 +199,25 @@ private:
 	// When both modifiers are held, the most recently pressed one wins.
 	EDustGaitModifier LastPressedGaitModifier = EDustGaitModifier::None;
 	EDustMovementGait CurrentGait = EDustMovementGait::Walk;
+	void ApplyGait(EDustMovementGait NewGait);
+	bool IsSprintDirectionAllowed() const;
+	void UpdateSprintDirectionWatch();
+	FTimerHandle SprintDirectionTimerHandle;
+
+	void TryFlushPendingSprintFire();
+	void TryFlushPendingSprintAim();
+	void ClearPendingSprintAim();
+	void FlushPendingSprintActions();
+	void SchedulePendingSprintActionFlush();
+	bool bSprintExitPresentationReady = true;
+	FTimerHandle PendingSprintActionFlushTimerHandle;
+	bool bPendingSprintAim = false;
+	TWeakObjectPtr<AWeaponRuntime> PendingSprintAimWeapon;
+	bool bFireInputHeld = false;
+	bool bPendingSprintFire = false;
+	TWeakObjectPtr<AWeaponRuntime> PendingSprintFireWeapon;
+	float PendingSprintFireReadyTime = 0.0f;
+	FTimerHandle PendingSprintFireTimerHandle;
 
 	void SetNativeAimState(bool bAiming);
 	void ObserveAimWeapon(AWeaponRuntime* Weapon);
