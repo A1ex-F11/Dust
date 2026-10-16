@@ -541,6 +541,43 @@ bool FAimedRecoilCleanupTest::RunTest(const FString& Parameters)
     return true;
 }
 
+// Feeds one consumed movement input so GetLastMovementInputVector() is deterministic
+// without ticking CharacterMovement. bForce bypasses the missing controller.
+static void FeedMoveInput(ADust2PlayerCharacter* Player, const FVector& WorldDirection)
+{
+    Player->AddMovementInput(WorldDirection, 1.0f, true);
+    Player->Internal_ConsumeMovementInputVector();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSprintDirectionGateTest,
+    "Dust2.Gait.SprintRequiresForwardInput",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSprintDirectionGateTest::RunTest(const FString& Parameters)
+{
+    AddExpectedMessage(TEXT("Inventory mirror sync rejected"), ELogVerbosity::Warning,
+        EAutomationExpectedMessageFlags::Contains, 0);
+    FAimTestWorld F;
+    if (!TestTrue(TEXT("fixture ready"), F.bReady)) return false;
+    const FVector Forward = F.Player->GetActorForwardVector();
+    const FVector Right = F.Player->GetActorRightVector();
+
+    const auto SprintGaitFor = [&F](const FVector& Direction)
+    {
+        F.Player->SetSprintHeld(false);
+        FeedMoveInput(F.Player, Direction);
+        F.Player->SetSprintHeld(true);
+        return F.Player->GetCurrentGait();
+    };
+
+    TestTrue(TEXT("no input stays Walk"), F.Player->GetCurrentGait() != EDustMovementGait::Run);
+    TestTrue(TEXT("forward enters Run"), SprintGaitFor(Forward) == EDustMovementGait::Run);
+    TestTrue(TEXT("diagonal forward enters Run"), SprintGaitFor((Forward + Right * 0.5f).GetSafeNormal()) == EDustMovementGait::Run);
+    TestTrue(TEXT("backward stays Walk"), SprintGaitFor(-Forward) == EDustMovementGait::Walk);
+    TestTrue(TEXT("pure strafe stays Walk"), SprintGaitFor(Right) == EDustMovementGait::Walk);
+    F.Player->SetSprintHeld(false);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSprintActionExitGateTest,
     "Dust2.Gait.SprintActionExitGateAndPendingAim",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -554,6 +591,7 @@ bool FSprintActionExitGateTest::RunTest(const FString& Parameters)
 
     // A report from the previous Walk pose cannot survive a new Run.
     F.Player->ReportSprintExitPresentationReady(false);
+    FeedMoveInput(F.Player, F.Player->GetActorForwardVector()); // Run now requires forward input (G09).
     F.Player->SetSprintHeld(true);
     TestTrue(TEXT("sprint intent enters Run"), F.Player->GetCurrentGait() == EDustMovementGait::Run);
 
@@ -613,6 +651,7 @@ bool FSprintFireAnimationExitGateTest::RunTest(const FString& Parameters)
     FAimTestWorld F;
     if (!TestTrue(TEXT("fixture ready"), F.bReady)) return false;
     F.Player->ReportSprintExitPresentationReady(false);
+    FeedMoveInput(F.Player, F.Player->GetActorForwardVector()); // Run now requires forward input (G09).
     F.Player->SetSprintHeld(true);
     TestFalse(TEXT("Run fire is cached"), F.Player->NotifyFirePressed());
     TestTrue(TEXT("one cached shot exists"), F.Player->HasPendingSprintFire());
@@ -718,6 +757,7 @@ bool FSprintModifierPriorityDuringActionLockTest::RunTest(const FString& Paramet
     FAimTestWorld F;
     if (!TestTrue(TEXT("fixture ready"), F.bReady)) return false;
     F.Player->SetSlowWalkHeld(true);
+    FeedMoveInput(F.Player, F.Player->GetActorForwardVector()); // Run now requires forward input (G09).
     F.Player->SetSprintHeld(true); // Sprint is now the most recently pressed modifier.
     TestTrue(TEXT("sprint wins before the action lock"), F.Player->GetCurrentGait() == EDustMovementGait::Run);
     TestFalse(TEXT("aim waits for the sprint pose to exit"), F.Press());
