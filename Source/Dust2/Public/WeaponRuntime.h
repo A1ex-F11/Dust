@@ -41,6 +41,24 @@ struct FWeaponPickupState
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon|Pickup")
 	bool bInitialDrawConsumed = false;
+
+	// Drop-local snapshot only, not checkpoint data. Both aim profiles keep their own clock.
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Pickup")
+	bool bHasFiringSpreadSnapshot = false;
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Pickup")
+	float CapturedWorldTime = 0.0f;
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Pickup")
+	float HipAccumulatedSpread = 0.0f;
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Pickup")
+	float AimAccumulatedSpread = 0.0f;
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Pickup")
+	float HipSecondsSinceShot = 0.0f;
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Pickup")
+	float AimSecondsSinceShot = 0.0f;
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Pickup")
+	bool bHasHipSpreadShot = false;
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Pickup")
+	bool bHasAimSpreadShot = false;
 };
 
 UCLASS()
@@ -59,6 +77,9 @@ public:
 	void CaptureDefinition(UWeaponDefinitionData* Destination) const;
 	UFUNCTION(BlueprintPure, Category = "武器配置", meta = (DisplayName = "获取当前连续射击散布", ToolTip = "返回额外散布角度，停火时按配置恢复。"))
 	float GetCurrentFiringSpread() const;
+	// W08: current cone half-angle for the next shot; read-only, no random sampling.
+	UFUNCTION(BlueprintPure, Category = "Spread", meta = (DisplayName = "获取当前总散布角", ToolTip = "度数半角：移动状态基础散布与当前射击累计散布之和，不改变弹道或状态。"))
+	float GetCurrentTotalSpreadAngle(float CurrentHorizontalSpeed, bool bIsFalling, bool bIsCrouched, bool bIsSlowWalking) const;
 	UFUNCTION(BlueprintPure, Category = "Weapon")
 	EFireMode GetFireMode() const;
 	UFUNCTION(BlueprintCallable, Category = "Weapon")
@@ -101,6 +122,8 @@ public:
 	FOnFireCommitted OnFireCommitted;
 	UFUNCTION(BlueprintCallable, Category = "Recoil")
 	void ResetRecoilPattern();
+	// Switching clears directional recoil as before, but cannot erase random spread.
+	void ResetRecoilForWeaponChange();
 	UFUNCTION(BlueprintCallable, Category = "Recoil")
 	void GenerateRecoilKick(float& PitchKick, float& YawKick, bool& bGenerated);
 	UFUNCTION(BlueprintCallable, Category = "Spread")

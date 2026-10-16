@@ -29,8 +29,10 @@ UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
 class DUST2_API UWeaponPresentationComponent : public UActorComponent
 {
 	GENERATED_BODY()
-public:
+public:	
 	UWeaponPresentationComponent();
+	// Read-only estimate from the actual watched final draw instances; never grants readiness.
+	bool GetDrawRemainingForWeapon(AWeaponRuntime* ExpectedWeapon, float& OutSeconds) const;
 UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
 	void SetWeaponForPresentation(AWeaponRuntime* NewWeapon);
 UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
@@ -161,6 +163,8 @@ UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
 	void CancelFullHolsterPresentation();
 UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
 	bool IsFullHolsterPresentationActive() const;
+UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+	void CancelReloadWeaponPresentation(bool bStopMontage = true);
 UFUNCTION(BlueprintCallable, BlueprintPure = false,
 		Category = "Weapon Presentation",
 		meta = (ReturnDisplayName = "Activated"))
@@ -200,23 +204,19 @@ UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
 		AWeaponRuntime* FormalWeapon,
 		USkeletalMeshComponent* WeaponMesh,
 		UAnimMontage* Montage);
-
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
-    void CancelReloadWeaponPresentation(bool bStopMontage = true);
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
-	FReloadWeaponPresentationEvent OnReloadRoundPresentationCommitted;
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
-	FReloadWeaponPresentationEvent OnReloadWeaponPresentationCompleted;
 UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
 		Category = "Weapon Presentation|Configuration",
 		meta = (DisplayName = "完整收枪完成通知名"))
 	FName FullHolsterFinishedNotifyName = TEXT("FullHolsterFinished");
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+	FReloadWeaponPresentationEvent OnReloadRoundPresentationCommitted;
+UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+	FReloadWeaponPresentationEvent OnReloadWeaponPresentationCompleted;
+UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
 	FPresentationSwitchCommitEvent OnPresentationSwitchCommitRequested;
 UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
 	FPresentationSwitchCommitEvent OnPresentationSwitchCommitCancelled;
 protected:
-
 UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
 		Category = "Weapon Presentation|Configuration",
 		meta = (DisplayName = "视觉武器基类"))
@@ -224,7 +224,6 @@ UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
 UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
 		Category = "Weapon Presentation|Configuration")
 	TArray<FWeaponPresentationProfile> WeaponPresentationProfiles;
-
 	virtual void EndPlay(
 		const EEndPlayReason::Type EndPlayReason) override;
 UPROPERTY(EditAnywhere, BlueprintReadWrite,
@@ -232,11 +231,8 @@ UPROPERTY(EditAnywhere, BlueprintReadWrite,
 		meta = (ClampMin = "0.0", DisplayName = "拔枪切换提前放行秒数"))
 	float DrawSwitchReleaseLeadTime = 0.3f;
 private:
-
 UPROPERTY(Transient)
 	TWeakObjectPtr<AWeaponRuntime> BoundWeapon;
-UPROPERTY(Transient)
-	TSet<TWeakObjectPtr<AWeaponRuntime>> InitialDrawConsumedWeapons;
 UPROPERTY(Transient)
 	TArray<TObjectPtr<UAudioComponent>> ReloadNotifyAudioComponents;
 UPROPERTY(Transient)
@@ -247,11 +243,9 @@ UPROPERTY(Transient)
 	TWeakObjectPtr<UAnimInstance> ActiveReloadAnimInstance;
 UPROPERTY(Transient)
 	TWeakObjectPtr<USkeletalMeshComponent> ActiveReloadWeaponMesh;
-
 	int32 ActiveReloadMontageInstanceId = INDEX_NONE;
 	int32 ActiveReloadWeaponRequestId = 0;
 	uint64 ReloadWeaponPlaybackSerial = 0;
-
 	bool IsReloadWeaponPlaybackCurrent() const;
 	void ReleaseReloadWeaponPlayback(bool bStopMontage);
 	TWeakObjectPtr<AWeaponRuntime> ActiveSynchronizedReloadWeapon;
@@ -280,22 +274,22 @@ UPROPERTY(Transient)
 		int32 InstanceId,
 		UAnimMontage* EndedMontage,
 		bool bInterrupted);
-
-
-	UFUNCTION()
-	void HandleReloadWeaponNotifyBegin(
-		FName NotifyName,
-		const FBranchingPointNotifyPayload& Payload);
-UFUNCTION()
-	void HandleFireCommitted();
-UFUNCTION()
-	void HandleReloadStarted();
+UPROPERTY(Transient)
+	TSet<TWeakObjectPtr<AWeaponRuntime>> InitialDrawConsumedWeapons;
 FTimerHandle FastDrawTransitionTimer;
 UPROPERTY(Transient)
 	TWeakObjectPtr<AWeaponRuntime> FastDrawTransitionWeapon;
 	bool bFastDrawTransitionPending = false;
 	uint64 FastDrawTransitionSerial = 0;
 	void HandleFastDrawTransitionTimer();
+UFUNCTION()
+	void HandleFireCommitted();
+UFUNCTION()
+	void HandleReloadStarted();
+UFUNCTION()
+	void HandleReloadWeaponNotifyBegin(
+		FName NotifyName,
+		const FBranchingPointNotifyPayload& Payload);
 TWeakObjectPtr<AWeaponRuntime> WatchedDrawWeapon;
 TWeakObjectPtr<UAnimInstance> DrawWatchAnimInstances[2];
 	int32 DrawWatchInstanceIds[2] = { INDEX_NONE, INDEX_NONE };
@@ -358,3 +352,5 @@ TWeakObjectPtr<UAnimInstance> ReloadBlockingDrawAnimInstances[2];
 	int32 ReloadBlockingDrawInstanceIds[2] = { INDEX_NONE, INDEX_NONE };
 	void ClearReloadBlockingDrawSnapshot();
 };
+
+

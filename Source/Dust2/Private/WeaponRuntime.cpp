@@ -7,6 +7,35 @@
 #include "FiringSpreadMath.h"
 #include "UObject/UnrealType.h"
 
+namespace
+{
+	// Shared by the committed shot and the read-only next-shot display.
+	float ResolveTotalSpreadAngle(const FWeaponSpreadProfile& Profile, float CurrentHorizontalSpeed,
+		bool bIsFalling, bool bIsCrouched, bool bIsSlowWalking, float FiringSpread)
+	{
+		const float SafeCurrentHorizontalSpeed = FMath::Max(0.0f, CurrentHorizontalSpeed);
+		const float SafeMovementSpreadSpeedThreshold = FMath::Max(0.0f, Profile.MovementSpreadSpeedThreshold);
+		float SelectedSpreadAngle = Profile.MovingSpreadAngle;
+		if (bIsFalling)
+		{
+			SelectedSpreadAngle = Profile.JumpSpreadAngle;
+		}
+		else if (bIsCrouched)
+		{
+			SelectedSpreadAngle = Profile.StationarySpreadAngle;
+		}
+		else if (SafeCurrentHorizontalSpeed <= SafeMovementSpreadSpeedThreshold)
+		{
+			SelectedSpreadAngle = Profile.StationarySpreadAngle;
+		}
+		else if (bIsSlowWalking)
+		{
+			SelectedSpreadAngle = Profile.SlowWalkSpreadAngle;
+		}
+		return FMath::Clamp(
+			(FMath::IsFinite(SelectedSpreadAngle) ? FMath::Max(0.0f, SelectedSpreadAngle) : 0.0f) + FiringSpread, 0.0f, 89.0f);
+	}
+}
 AWeaponRuntime::AWeaponRuntime()
 
 {
@@ -177,6 +206,14 @@ void AWeaponRuntime::ResetRecoilPattern()
 	AccumulatedFiringSpread = 0.0f;
 	CommittedFiringSpread = 0.0f;
 	bHasSpreadShot = false;
+	ResetRecoilForWeaponChange();
+}
+
+void AWeaponRuntime::ResetRecoilForWeaponChange()
+{
+	bHasCommittedSpreadProfile = false;
+	bCommittedIgnoreShotRecoil = false;
+	CommittedFiringSpread = 0.0f;
 	AccumulatedShotRecoil = FVector2D::ZeroVector;
 	CommittedShotRecoil = FVector2D::ZeroVector;
 	bHasCommittedShotDirection = false;
@@ -335,7 +372,6 @@ void AWeaponRuntime::GenerateShotDirection(
 	{
 		return;
 	}
-	const float SafeCurrentHorizontalSpeed = FMath::Max(0.0f, CurrentHorizontalSpeed);
 	if (RecoilData && RecoilData->bUseFixedPattern && RecoilData->bUseIndependentShotRecoil)
 	{
 		if (!bHasCommittedShotDirection) return;
@@ -345,26 +381,8 @@ void AWeaponRuntime::GenerateShotDirection(
 	}
 	const FWeaponSpreadProfile Profile = bHasCommittedSpreadProfile
 		? CommittedSpreadProfile : GetSpreadProfile(bOwnerAiming);
-	const float SafeMovementSpreadSpeedThreshold = FMath::Max(0.0f, Profile.MovementSpreadSpeedThreshold);
-	float SelectedSpreadAngle = Profile.MovingSpreadAngle;
-	if (bIsFalling)
-	{
-		SelectedSpreadAngle = Profile.JumpSpreadAngle;
-	}
-	else if (bIsCrouched)
-	{
-		SelectedSpreadAngle = Profile.StationarySpreadAngle;
-	}
-	else if (SafeCurrentHorizontalSpeed <= SafeMovementSpreadSpeedThreshold)
-	{
-		SelectedSpreadAngle = Profile.StationarySpreadAngle;
-	}
-	else if (bIsSlowWalking)
-	{
-		SelectedSpreadAngle = Profile.SlowWalkSpreadAngle;
-	}
-	const float SafeSpreadAngle = FMath::Clamp(
-		(FMath::IsFinite(SelectedSpreadAngle) ? FMath::Max(0.0f, SelectedSpreadAngle) : 0.0f) + CommittedFiringSpread, 0.0f, 89.0f);
+	const float SafeSpreadAngle = ResolveTotalSpreadAngle(Profile, CurrentHorizontalSpeed,
+		bIsFalling, bIsCrouched, bIsSlowWalking, CommittedFiringSpread);
 	const float ConeHalfAngleRadians = FMath::DegreesToRadians(SafeSpreadAngle);
 	ShotDirection = FMath::VRandCone(
 		BaseDirection,
@@ -504,6 +522,18 @@ void AWeaponRuntime::RestorePickupRuntimeState(const FWeaponPickupState& State)
 
 	RestoreAmmo(State.CurrentAmmo, State.ReserveAmmo);
 	RestoreFireMode(State.FireMode);
+	if (State.bHasFiringSpreadSnapshot && GetWorld())
+	{
+		const auto Safe = [](float Value) { return FMath::IsFinite(Value) ? FMath::Max(0.0f, Value) : 0.0f; };
+		const float Now = GetWorld()->GetTimeSeconds();
+		const float DroppedElapsed = FMath::Max(0.0f, Now - Safe(State.CapturedWorldTime));
+		AccumulatedFiringSpread = Safe(State.HipAccumulatedSpread);
+		AccumulatedAimFiringSpread = Safe(State.AimAccumulatedSpread);
+		LastSpreadShotTime = Now - Safe(State.HipSecondsSinceShot) - DroppedElapsed;
+		LastAimSpreadShotTime = Now - Safe(State.AimSecondsSinceShot) - DroppedElapsed;
+		bHasSpreadShot = State.bHasHipSpreadShot;
+		bHasAimSpreadShot = State.bHasAimSpreadShot;
+	}
 }
 FWeaponPickupState AWeaponRuntime::CapturePickupRuntimeState(
 	bool bInitialDrawConsumed) const
@@ -514,6 +544,17 @@ FWeaponPickupState AWeaponRuntime::CapturePickupRuntimeState(
 	State.ReserveAmmo = GetReserveAmmo();
 	State.FireMode = GetFireMode();
 	State.bInitialDrawConsumed = bInitialDrawConsumed;
+	if (GetWorld())
+	{
+		State.bHasFiringSpreadSnapshot = true;
+		State.CapturedWorldTime = GetWorld()->GetTimeSeconds();
+		State.HipAccumulatedSpread = AccumulatedFiringSpread;
+		State.AimAccumulatedSpread = AccumulatedAimFiringSpread;
+		State.HipSecondsSinceShot = FMath::Max(0.0f, State.CapturedWorldTime - LastSpreadShotTime);
+		State.AimSecondsSinceShot = FMath::Max(0.0f, State.CapturedWorldTime - LastAimSpreadShotTime);
+		State.bHasHipSpreadShot = bHasSpreadShot;
+		State.bHasAimSpreadShot = bHasAimSpreadShot;
+	}
 	return State;
 }
 
@@ -606,6 +647,12 @@ float AWeaponRuntime::GetCurrentFiringSpread() const
 	return GetFiringSpreadForProfile(bOwnerAiming);
 }
 
+float AWeaponRuntime::GetCurrentTotalSpreadAngle(float CurrentHorizontalSpeed,
+	bool bIsFalling, bool bIsCrouched, bool bIsSlowWalking) const
+{
+	return ResolveTotalSpreadAngle(GetSpreadProfile(bOwnerAiming), CurrentHorizontalSpeed,
+		bIsFalling, bIsCrouched, bIsSlowWalking, GetCurrentFiringSpread());
+}
 FWeaponSpreadProfile AWeaponRuntime::GetSpreadProfile(bool bAiming) const
 {
 	if (bAiming && WeaponDefinition && WeaponDefinition->bUseAimingSpread)

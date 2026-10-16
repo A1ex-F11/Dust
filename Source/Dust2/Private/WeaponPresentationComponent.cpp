@@ -11,7 +11,7 @@
 
 UWeaponPresentationComponent::UWeaponPresentationComponent()
 {
-
+	
 	PrimaryComponentTick.bCanEverTick = false;
 }
 void UWeaponPresentationComponent::SetWeaponForPresentation(
@@ -34,8 +34,8 @@ void UWeaponPresentationComponent::SetWeaponForPresentation(
 	CancelReloadWeaponPresentation();
 	if (AWeaponRuntime* OldWeapon = BoundWeapon.Get())
 	{
-		OldWeapon->ResetRecoilPattern();
-		OldWeapon->OnFireCommitted.RemoveDynamic(
+		OldWeapon->ResetRecoilForWeaponChange();
+        OldWeapon->OnFireCommitted.RemoveDynamic(
 			this,
 			&UWeaponPresentationComponent::HandleFireCommitted);
 
@@ -47,8 +47,8 @@ void UWeaponPresentationComponent::SetWeaponForPresentation(
 	BoundWeapon = NewWeapon;
 	if (NewWeapon)
 	{
-		NewWeapon->ResetRecoilPattern();
-		NewWeapon->OnFireCommitted.AddUniqueDynamic(
+		NewWeapon->ResetRecoilForWeaponChange();
+        NewWeapon->OnFireCommitted.AddUniqueDynamic(
 			this,
 			&UWeaponPresentationComponent::HandleFireCommitted);
 
@@ -990,8 +990,6 @@ void UWeaponPresentationComponent::ReleaseReloadWeaponPlayback(
 {
 	UAnimInstance* AnimInstance = ActiveReloadAnimInstance.Get();
 	const int32 SavedInstanceId = ActiveReloadMontageInstanceId;
-
-	// ��ʹ����ί���Ѹ��ƽ����У���serialҲ��ʹ��ʧЧ��
 	++ReloadWeaponPlaybackSerial;
 	ActiveReloadWeapon.Reset();
 	ActiveReloadAnimInstance.Reset();
@@ -1297,6 +1295,14 @@ void UWeaponPresentationComponent::ClearEarlyDrawSwitchRelease()
 	ActiveDrawSwitchLeadTime = 0.0f;
 }
 
+bool UWeaponPresentationComponent::GetDrawRemainingForWeapon(
+	AWeaponRuntime* ExpectedWeapon, float& OutSeconds) const
+{
+	OutSeconds = 0.0f;
+	return IsValid(ExpectedWeapon) && ExpectedWeapon == BoundWeapon.Get()
+		&& ExpectedWeapon == WatchedDrawWeapon.Get() && TryGetDrawRemainingTime(OutSeconds);
+}
+
 bool UWeaponPresentationComponent::TryGetDrawRemainingTime(
 	float& OutSeconds) const
 {
@@ -1403,8 +1409,7 @@ void UWeaponPresentationComponent::InterruptDrawPresentationWatch()
 	bDrawWatchFailed = true;
 	TryFinishDrawPresentationWatch();
 }
-
-bool UWeaponPresentationComponent::StartFullHolsterPresentation(
+	bool UWeaponPresentationComponent::StartFullHolsterPresentation(
 		AWeaponRuntime * FormalWeapon,
 		USkeletalMeshComponent * CharacterMesh,
 		USkeletalMeshComponent * WeaponMesh,
@@ -1804,8 +1809,7 @@ bool UWeaponPresentationComponent::StartFullHolsterPresentation(
 			}
 		}
 	}
-
-void UWeaponPresentationComponent::PlayFastHolsterPresentation(
+	void UWeaponPresentationComponent::PlayFastHolsterPresentation(
 		USkeletalMeshComponent* CharacterMesh,
 		const FWeaponPresentationProfile& Profile)
 	{
@@ -1913,97 +1917,95 @@ void UWeaponPresentationComponent::PlayFastHolsterPresentation(
 
 		OnPresentationSwitchCommitRequested.Broadcast(ExpectedWeapon);
 	}
-
-bool UWeaponPresentationComponent::TryActivateVisualWeapon(
-	AWeaponRuntime* FormalWeapon,
-	UChildActorComponent* VisualWeaponComponent,
-	AActor*& OutVisualWeapon,
-	FWeaponPresentationProfile& OutProfile)
-{
-	OutVisualWeapon = nullptr;
-	OutProfile = FWeaponPresentationProfile{};
-
-	AActor* PlayerOwner = GetOwner();
-	if (!IsValid(PlayerOwner)
-		|| !IsValid(FormalWeapon)
-		|| BoundWeapon.Get() != FormalWeapon
-		|| !IsValid(VisualWeaponComponent)
-		|| VisualWeaponComponent->GetOwner() != PlayerOwner
-		|| !VisualWeaponBaseClass)
+	bool UWeaponPresentationComponent::TryActivateVisualWeapon(
+		AWeaponRuntime* FormalWeapon,
+		UChildActorComponent* VisualWeaponComponent,
+		AActor*& OutVisualWeapon,
+		FWeaponPresentationProfile& OutProfile)
 	{
-		return false;
-	}
+		OutVisualWeapon = nullptr;
+		OutProfile = FWeaponPresentationProfile{};
 
-	FWeaponPresentationProfile CandidateProfile;
-	if (!FindWeaponPresentationProfile(FormalWeapon, CandidateProfile)
-		|| !CandidateProfile.bUseTacticalPresentation
-		|| !CandidateProfile.VisualWeaponClass
-		|| !CandidateProfile.VisualWeaponClass->IsChildOf(
-			VisualWeaponBaseClass.Get()))
-	{
-		return false;
-	}
-
-	AActor* VisualWeapon = VisualWeaponComponent->GetChildActor();
-	if (!IsValid(VisualWeapon)
-		|| !VisualWeapon->IsA(CandidateProfile.VisualWeaponClass.Get()))
-	{
-		return false;
-	}
-
-	VisualWeapon->SetOwner(PlayerOwner);
-	VisualWeapon->SetActorTickEnabled(false);
-	VisualWeapon->SetActorHiddenInGame(false);
-
-	OutVisualWeapon = VisualWeapon;
-	OutProfile = CandidateProfile;
-	return true;
-}
-
-bool UWeaponPresentationComponent::CanStartReloadPresentation(
-	AWeaponRuntime* FormalWeapon,
-	bool bPresentationSwitching) const
-{
-	if (!IsValid(FormalWeapon)
-		|| BoundWeapon.Get() != FormalWeapon
-		|| bPresentationSwitching
-		|| bFullHolsterActive
-		|| bPresentationSwitchCommitPending
-		|| bFastDrawTransitionPending)
-	{
-		return false;
-	}
-
-	if (ReloadBlockingDrawWeapon.Get() == FormalWeapon)
-	{
-		for (int32 Layer = 0; Layer < 2; ++Layer)
+		AActor* PlayerOwner = GetOwner();
+		if (!IsValid(PlayerOwner)
+			|| !IsValid(FormalWeapon)
+			|| BoundWeapon.Get() != FormalWeapon
+			|| !IsValid(VisualWeaponComponent)
+			|| VisualWeaponComponent->GetOwner() != PlayerOwner
+			|| !VisualWeaponBaseClass)
 		{
-			UAnimInstance* AnimInstance =
-				ReloadBlockingDrawAnimInstances[Layer].Get();
-			const int32 InstanceId =
-				ReloadBlockingDrawInstanceIds[Layer];
-			if (!IsValid(AnimInstance) || InstanceId == INDEX_NONE)
-			{
-				continue;
-			}
+			return false;
+		}
 
-			FAnimMontageInstance* Instance =
-				AnimInstance->GetMontageInstanceForID(InstanceId);
-			if (Instance && Instance->IsValid())
+		FWeaponPresentationProfile CandidateProfile;
+		if (!FindWeaponPresentationProfile(FormalWeapon, CandidateProfile)
+			|| !CandidateProfile.bUseTacticalPresentation
+			|| !CandidateProfile.VisualWeaponClass
+			|| !CandidateProfile.VisualWeaponClass->IsChildOf(
+				VisualWeaponBaseClass.Get()))
+		{
+			return false;
+		}
+
+		AActor* VisualWeapon = VisualWeaponComponent->GetChildActor();
+		if (!IsValid(VisualWeapon)
+			|| !VisualWeapon->IsA(CandidateProfile.VisualWeaponClass.Get()))
+		{
+			return false;
+		}
+
+		VisualWeapon->SetOwner(PlayerOwner);
+		VisualWeapon->SetActorTickEnabled(false);
+		VisualWeapon->SetActorHiddenInGame(false);
+
+		OutVisualWeapon = VisualWeapon;
+		OutProfile = CandidateProfile;
+		return true;
+	}
+	bool UWeaponPresentationComponent::CanStartReloadPresentation(
+		AWeaponRuntime* FormalWeapon,
+		bool bPresentationSwitching) const
+	{
+		if (!IsValid(FormalWeapon)
+			|| BoundWeapon.Get() != FormalWeapon
+			|| bPresentationSwitching
+			|| bFullHolsterActive
+			|| bPresentationSwitchCommitPending
+			|| bFastDrawTransitionPending)
+		{
+			return false;
+		}
+
+		if (ReloadBlockingDrawWeapon.Get() == FormalWeapon)
+		{
+			for (int32 Layer = 0; Layer < 2; ++Layer)
 			{
-				return false;
+				UAnimInstance* AnimInstance =
+					ReloadBlockingDrawAnimInstances[Layer].Get();
+				const int32 InstanceId =
+					ReloadBlockingDrawInstanceIds[Layer];
+				if (!IsValid(AnimInstance) || InstanceId == INDEX_NONE)
+				{
+					continue;
+				}
+
+				FAnimMontageInstance* Instance =
+					AnimInstance->GetMontageInstanceForID(InstanceId);
+				if (Instance && Instance->IsValid())
+				{
+					return false;
+				}
 			}
 		}
-	}
 
-	return true;
-}
-void UWeaponPresentationComponent::ClearReloadBlockingDrawSnapshot()
-{
-	ReloadBlockingDrawWeapon.Reset();
-	for (int32 Layer = 0; Layer < 2; ++Layer)
-	{
-		ReloadBlockingDrawAnimInstances[Layer].Reset();
-		ReloadBlockingDrawInstanceIds[Layer] = INDEX_NONE;
+		return true;
 	}
-}
+	void UWeaponPresentationComponent::ClearReloadBlockingDrawSnapshot()
+	{
+		ReloadBlockingDrawWeapon.Reset();
+		for (int32 Layer = 0; Layer < 2; ++Layer)
+		{
+			ReloadBlockingDrawAnimInstances[Layer].Reset();
+			ReloadBlockingDrawInstanceIds[Layer] = INDEX_NONE;
+		}
+	}
