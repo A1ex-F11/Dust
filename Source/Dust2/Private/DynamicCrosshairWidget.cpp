@@ -8,11 +8,6 @@
 
 namespace
 {
-	float SanitizeNonNegative(float Value)
-	{
-		return FMath::IsFinite(Value) ? FMath::Max(0.0f, Value) : 0.0f;
-	}
-
 	float SanitizeGapComponent(float Value, float MinimumValue)
 	{
 		return FMath::IsFinite(Value)
@@ -46,9 +41,37 @@ namespace
 	}
 }
 
+FCrosshairStyleSettings FCrosshairStyleSettings::GetSanitized() const
+{
+	FCrosshairStyleSettings Safe = *this;
+	const auto NonNegativeOrDefault = [](float Value, float DefaultValue)
+	{
+		return FMath::IsFinite(Value) ? FMath::Max(0.0f, Value) : DefaultValue;
+	};
+	const auto ColorChannel = [](float Value, float DefaultValue)
+	{
+		return FMath::IsFinite(Value) ? FMath::Clamp(Value, 0.0f, 1.0f) : DefaultValue;
+	};
+
+	Safe.MinimumGap = FVector2D(
+		NonNegativeOrDefault(MinimumGap.X, 3.0f),
+		NonNegativeOrDefault(MinimumGap.Y, 3.0f));
+	Safe.LineLength = NonNegativeOrDefault(LineLength, 7.0f);
+	Safe.LineThickness = NonNegativeOrDefault(LineThickness, 1.75f);
+	Safe.CrosshairColor = FLinearColor(
+		ColorChannel(CrosshairColor.R, 1.0f),
+		ColorChannel(CrosshairColor.G, 1.0f),
+		ColorChannel(CrosshairColor.B, 1.0f),
+		ColorChannel(CrosshairColor.A, 1.0f));
+	Safe.SpreadDisplayScale = FMath::IsFinite(SpreadDisplayScale)
+		? FMath::Clamp(SpreadDisplayScale, 0.0f, 10.0f)
+		: 1.0f;
+	return Safe;
+}
+
 void UDynamicCrosshairWidget::SetCrosshairGap(FVector2D InGap)
 {
-	const FVector2D SafeMinimumGap = GetSafeMinimumGap();
+	const FVector2D SafeMinimumGap = GetCrosshairMinimumGap();
 	const FVector2D NewGap(
 		SanitizeGapComponent(InGap.X, SafeMinimumGap.X),
 		SanitizeGapComponent(InGap.Y, SafeMinimumGap.Y));
@@ -56,26 +79,111 @@ void UDynamicCrosshairWidget::SetCrosshairGap(FVector2D InGap)
 	if (CrosshairGap != NewGap)
 	{
 		CrosshairGap = NewGap;
-		if (TSharedPtr<SWidget> CachedWidget = GetCachedWidget())
-		{
-			CachedWidget->Invalidate(EInvalidateWidgetReason::Paint);
-		}
+		InvalidateCrosshairPaint();
 	}
 }
 
 FVector2D UDynamicCrosshairWidget::GetCrosshairGap() const
 {
-	const FVector2D SafeMinimumGap = GetSafeMinimumGap();
+	const FCrosshairStyleSettings Style = GetResolvedStyleSettings();
+	const FVector2D SafeMinimumGap = Style.MinimumGap;
+	if (!Style.bDynamicSpread)
+	{
+		return SafeMinimumGap;
+	}
+
 	return FVector2D(
 		SanitizeGapComponent(CrosshairGap.X, SafeMinimumGap.X),
 		SanitizeGapComponent(CrosshairGap.Y, SafeMinimumGap.Y));
 }
 
-FVector2D UDynamicCrosshairWidget::GetSafeMinimumGap() const
+FCrosshairStyleSettings UDynamicCrosshairWidget::GetResolvedStyleSettings() const
 {
+	if (bUseStyleOverride)
+	{
+		return StyleOverride.GetSanitized();
+	}
+	if (StyleAsset)
+	{
+		return StyleAsset->Settings.GetSanitized();
+	}
+
+	FCrosshairStyleSettings LegacySettings;
+	LegacySettings.MinimumGap = MinimumGap;
+	LegacySettings.LineLength = LineLength;
+	LegacySettings.LineThickness = LineThickness;
+	LegacySettings.CrosshairColor = CrosshairColor;
+	return LegacySettings.GetSanitized();
+}
+
+FVector2D UDynamicCrosshairWidget::GetCrosshairMinimumGap() const
+{
+	return GetResolvedStyleSettings().MinimumGap;
+}
+
+FVector2D UDynamicCrosshairWidget::ResolveStyleTargetGap(FVector2D ProjectedGap) const
+{
+	const FCrosshairStyleSettings Style = GetResolvedStyleSettings();
+	const FVector2D Minimum = Style.MinimumGap;
+	if (!Style.bDynamicSpread)
+	{
+		return Minimum;
+	}
+
+	const auto ResolveComponent = [Scale = static_cast<double>(Style.SpreadDisplayScale)](
+		float Projected, float MinimumValue)
+	{
+		if (!FMath::IsFinite(Projected))
+		{
+			return MinimumValue;
+		}
+		const double Resolved = static_cast<double>(MinimumValue)
+			+ FMath::Max(0.0, static_cast<double>(Projected) - MinimumValue) * Scale;
+		const double MaxFloat = static_cast<double>(TNumericLimits<float>::Max());
+		return static_cast<float>(FMath::Clamp(Resolved, static_cast<double>(MinimumValue), MaxFloat));
+	};
 	return FVector2D(
-		SanitizeNonNegative(MinimumGap.X),
-		SanitizeNonNegative(MinimumGap.Y));
+		ResolveComponent(ProjectedGap.X, Minimum.X),
+		ResolveComponent(ProjectedGap.Y, Minimum.Y));
+}
+
+void UDynamicCrosshairWidget::ApplyStyleOverride(FCrosshairStyleSettings InSettings)
+{
+	StyleOverride = InSettings.GetSanitized();
+	bUseStyleOverride = true;
+	InvalidateCrosshairPaint();
+}
+
+void UDynamicCrosshairWidget::ClearStyleOverride()
+{
+	if (bUseStyleOverride)
+	{
+		bUseStyleOverride = false;
+		InvalidateCrosshairPaint();
+	}
+}
+
+void UDynamicCrosshairWidget::SetStyleAsset(UCrosshairStyleData* InStyleAsset)
+{
+	if (StyleAsset != InStyleAsset)
+	{
+		StyleAsset = InStyleAsset;
+		InvalidateCrosshairPaint();
+	}
+}
+
+void UDynamicCrosshairWidget::NativePreConstruct()
+{
+	Super::NativePreConstruct();
+	InvalidateCrosshairPaint();
+}
+
+void UDynamicCrosshairWidget::InvalidateCrosshairPaint()
+{
+	if (TSharedPtr<SWidget> CachedWidget = GetCachedWidget())
+	{
+		CachedWidget->Invalidate(EInvalidateWidgetReason::Paint);
+	}
 }
 
 int32 UDynamicCrosshairWidget::NativePaint(
@@ -91,8 +199,9 @@ int32 UDynamicCrosshairWidget::NativePaint(
 		Args, AllottedGeometry, MyCullingRect, OutDrawElements,
 		LayerId, InWidgetStyle, bParentEnabled);
 
-	const float SafeLength = SanitizeNonNegative(LineLength);
-	const float SafeThickness = SanitizeNonNegative(LineThickness);
+	const FCrosshairStyleSettings Style = GetResolvedStyleSettings();
+	const float SafeLength = Style.LineLength;
+	const float SafeThickness = Style.LineThickness;
 	const FVector2D LocalSize = AllottedGeometry.GetLocalSize();
 	if (SafeLength <= 0.0f || SafeThickness <= 0.0f
 		|| !FMath::IsFinite(LocalSize.X) || !FMath::IsFinite(LocalSize.Y)
@@ -113,7 +222,7 @@ int32 UDynamicCrosshairWidget::NativePaint(
 	const FVector2D VerticalSize(SafeThickness, SafeLength);
 	const double HalfThickness = static_cast<double>(SafeThickness) * 0.5;
 
-	const FLinearColor CrosshairTint = SanitizeColor(CrosshairColor, FLinearColor::White);
+	const FLinearColor CrosshairTint = Style.CrosshairColor;
 	const FLinearColor ParentTint = SanitizeColor(
 		InWidgetStyle.GetColorAndOpacityTint(), FLinearColor::White);
 	const FLinearColor FinalTint = CrosshairTint * ParentTint;

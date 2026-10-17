@@ -99,7 +99,8 @@ bool UDustCrosshairComponent::BuildTargetGap(FVector2D& OutGap) const
     ADust2PlayerCharacter* OwnerPlayer = Player.Get();
     UCameraComponent* Camera = CameraSource.Get();
     if (!Widget || !OwnerPlayer || !Camera) return false;
-    OutGap = Widget->MinimumGap;
+    OutGap = Widget->GetCrosshairMinimumGap();
+    if (!Widget->GetResolvedStyleSettings().bDynamicSpread) return true;
     const AWeaponRuntime* Weapon = DisplayedWeapon.Get();
     if (!Weapon) return true; // Keep the established empty-hand visibility policy.
     const UCharacterMovementComponent* Movement = OwnerPlayer->GetCharacterMovement();
@@ -132,8 +133,7 @@ bool UDustCrosshairComponent::BuildTargetGap(FVector2D& OutGap) const
     const FVector2D UpLocal = Geometry.AbsoluteToLocal(Viewport.LocalToAbsolute(UpUI));
     const FVector2D ProjectedGap((RightLocal - CenterLocal).Size(), (UpLocal - CenterLocal).Size());
     if (!FMath::IsFinite(ProjectedGap.X) || !FMath::IsFinite(ProjectedGap.Y)) return false;
-    OutGap = FVector2D(FMath::Max(Widget->MinimumGap.X, ProjectedGap.X),
-        FMath::Max(Widget->MinimumGap.Y, ProjectedGap.Y));
+    OutGap = Widget->ResolveStyleTargetGap(ProjectedGap);
     return true;
 }
 
