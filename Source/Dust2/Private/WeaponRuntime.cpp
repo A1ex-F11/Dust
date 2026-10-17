@@ -201,6 +201,23 @@ void AWeaponRuntime::GenerateRecoilKick(
 	bGenerated = true;
 }
 
+FVector2D AWeaponRuntime::GetCurrentIndependentShotRecoil() const
+{
+	if (!RecoilData || !RecoilData->bUseFixedPattern || !RecoilData->bUseIndependentShotRecoil
+		|| !bHasSuccessfulShotTime || !GetWorld()) return FVector2D::ZeroVector;
+	const float QuietTime = FMath::Max(0.0f, GetWorld()->GetTimeSeconds() - LastSuccessfulShotTime);
+	const float Reset = FMath::IsFinite(RecoilData->PatternResetDelay) ? FMath::Max(0.0f, RecoilData->PatternResetDelay) : 0.0f;
+	if (QuietTime >= Reset) return FVector2D::ZeroVector;
+	const float Delay = FMath::IsFinite(RecoilData->RecoveryDelay) ? FMath::Max(0.0f, RecoilData->RecoveryDelay) : 0.0f;
+	const float Speed = FMath::IsFinite(RecoilData->ShotRecoilRecoverySpeed) ? FMath::Max(0.0f, RecoilData->ShotRecoilRecoverySpeed) : 0.0f;
+	return FShotRecoilMath::Recover(AccumulatedShotRecoil, QuietTime, Delay, Speed);
+}
+
+FVector2D AWeaponRuntime::GetCommittedIndependentShotRecoil() const
+{
+	return bHasCommittedShotDirection && !bCommittedIgnoreShotRecoil ? CommittedShotRecoil : FVector2D::ZeroVector;
+}
+
 void AWeaponRuntime::ResetRecoilPattern()
 {
 	AccumulatedAimFiringSpread = 0.0f;

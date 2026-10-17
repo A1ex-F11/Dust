@@ -122,6 +122,11 @@ public:
 	FOnFireCommitted OnFireCommitted;
 	UFUNCTION(BlueprintCallable, Category = "Recoil")
 	void ResetRecoilPattern();
+	// AI observes the same next-shot recoil without advancing the pattern or consuming a kick.
+	UFUNCTION(BlueprintPure, Category = "Recoil", meta=(DisplayName="获取当前独立射击后坐"))
+	FVector2D GetCurrentIndependentShotRecoil() const;
+	UFUNCTION(BlueprintPure, Category = "Recoil", meta=(DisplayName="获取本发已提交后坐"))
+	FVector2D GetCommittedIndependentShotRecoil() const;
 	// Switching clears directional recoil as before, but cannot erase random spread.
 	void ResetRecoilForWeaponChange();
 	UFUNCTION(BlueprintCallable, Category = "Recoil")

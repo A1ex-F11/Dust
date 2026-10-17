@@ -9,7 +9,7 @@ public class Dust2 : ModuleRules
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         if (Target.bBuildEditor) PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "AssetRegistry", "NiagaraEditor", "BlueprintGraph", "RHI" });
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "Niagara", "UMG", "SlateCore" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "Niagara", "UMG", "SlateCore", "AIModule", "GameplayTasks", "NavigationSystem", "StateTreeModule", "GameplayStateTreeModule" });
 
 
 		// Uncomment if you are using Slate UI
