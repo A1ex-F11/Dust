@@ -771,5 +771,44 @@ bool FSprintModifierPriorityDuringActionLockTest::RunTest(const FString& Paramet
     TestTrue(TEXT("releasing both modifiers returns Walk"), F.Player->GetCurrentGait() == EDustMovementGait::Walk);
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIntuitiveHipKeepsExactAimTest,
+    "Dust2.Aim.DualSpread.IntuitiveHipKeepsExactAimAndCapture",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FIntuitiveHipKeepsExactAimTest::RunTest(const FString& Parameters)
+{
+    AddExpectedMessage(TEXT("Inventory mirror sync rejected"), ELogVerbosity::Warning,
+        EAutomationExpectedMessageFlags::Contains, 0);
+    FAimTestWorld F;
+    if (!TestTrue(TEXT("fixture ready"), F.bReady)) return false;
+    UWeaponDefinitionData* D = ConfigureDualSpread(F);
+    D->bUseIntuitiveHipAccuracy = true;
+    D->HipAccuracy.BaseSpreadAngle = 8.0f;
+    D->HipAccuracy.MovingExtraAngle = 3.0f;
+    D->HipAccuracy.AirborneExtraAngle = 5.0f;
+    D->HipAccuracy.MaxFiringExtraAngle = 0.7f;
+    D->HipAccuracy.ShotsToMaximum = 14;
+    D->HipAccuracy.FullRecoverySeconds = 1.0f;
+    TestEqual(TEXT("Hip uses additive rule"), F.Weapon1->GetCurrentTotalSpreadAngle(100, true, false, false), 16.0f);
+    TestTrue(TEXT("Legal aim still enters"), F.Press());
+    TestEqual(TEXT("Existing zero ADS cone preserved"), F.Weapon1->GetCurrentTotalSpreadAngle(100, true, false, false), 0.0f);
+    TestTrue(TEXT("Aim shot accepted"), F.Weapon1->TryCommitFire());
+    TestTrue(TEXT("Aim stays exact even after intuitive hip opt-in"), AllDirectionsExact(F.Weapon1, 100, true));
+    F.Release();
+    TestTrue(TEXT("Hip accumulation also remembers an ADS shot"), F.Weapon1->GetCurrentFiringSpread() > 0.0f);
+    UWeaponDefinitionData* Captured = NewObject<UWeaponDefinitionData>();
+    F.Weapon1->CaptureDefinition(Captured);
+    TestTrue(TEXT("Capture preserves opt-in"), Captured->bUseIntuitiveHipAccuracy);
+    TestEqual(TEXT("Capture preserves base"), Captured->HipAccuracy.BaseSpreadAngle, 8.0f);
+    TestEqual(TEXT("Capture preserves shot-count target"), Captured->HipAccuracy.ShotsToMaximum, 14);
+    D->bUseIntuitiveAimAccuracy = true;
+    D->AimAccuracy.BaseSpreadAngle = 0;
+    D->AimAccuracy.MovingExtraAngle = 0;
+    D->AimAccuracy.SlowWalkExtraAngle = 0;
+    D->AimAccuracy.AirborneExtraAngle = 0;
+    D->AimAccuracy.MaxFiringExtraAngle = 0;
+    TestTrue(TEXT("Re-enter aim"), F.Press());
+    TestEqual(TEXT("Optional intuitive ADS can also be exact"), F.Weapon1->GetCurrentTotalSpreadAngle(100, true, true, false), 0.0f);
+    return true;
+}
 #endif
 

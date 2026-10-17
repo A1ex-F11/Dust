@@ -34,6 +34,11 @@ public:
     float FollowRate = 20.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crosshair|Display",
+        meta = (ClampMin = "1.0", UIMax = "4.0", DisplayName = "射击扩散显示倍率",
+            ToolTip = "只放大射击累计项的准星反馈，不改变移动基础、弹道或固定轨迹。1按真实角度；大于1时是视觉反馈，不是严格弹着范围。"))
+    float FiringSpreadDisplayScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crosshair|Display",
         meta = (ClampMin = "0.0", DisplayName = "换枪过渡最长秒数"))
     float SwitchTransitionSeconds = 0.18f;
 

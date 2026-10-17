@@ -152,3 +152,16 @@ private:
 	float TransitionDurationSeconds = 0.0f;
 	bool bTransitionActive = false;
 };
+
+/** Pure visual mapping: the caller retains authority over real shot precision. */
+struct FCrosshairDisplayAngle
+{
+	static float WithFiringFeedback(float TotalAngle, float FiringAngle, float Scale)
+	{
+		const auto Safe = [](float V) { return FMath::IsFinite(V) ? FMath::Max(0.0f, V) : 0.0f; };
+		const float Base = FMath::Clamp(Safe(TotalAngle), 0.0f, 89.0f);
+		const float Bloom = FMath::Min(Safe(FiringAngle), Base);
+		const float SafeScale = FMath::IsFinite(Scale) ? FMath::Max(1.0f, Scale) : 1.0f;
+		return FMath::Clamp(Base + Bloom * (SafeScale - 1.0f), 0.0f, 89.0f);
+	}
+};

@@ -104,8 +104,10 @@ bool UDustCrosshairComponent::BuildTargetGap(FVector2D& OutGap) const
     if (!Weapon) return true; // Keep the established empty-hand visibility policy.
     const UCharacterMovementComponent* Movement = OwnerPlayer->GetCharacterMovement();
     if (!Movement) return false;
-    const float Angle = Weapon->GetCurrentTotalSpreadAngle(
+    const float TotalAngle = Weapon->GetCurrentTotalSpreadAngle(
         OwnerPlayer->GetVelocity().Size2D(), Movement->IsFalling(), false, OwnerPlayer->IsSlowWalking());
+    const float Angle = FCrosshairDisplayAngle::WithFiringFeedback(TotalAngle,
+        Weapon->GetCurrentFiringSpread(), FiringSpreadDisplayScale);
     APlayerController* Controller = Widget->GetOwningPlayer();
     if (!Controller || !Controller->IsLocalController()) return false;
     const FGeometry& Geometry = Widget->GetCachedGeometry();

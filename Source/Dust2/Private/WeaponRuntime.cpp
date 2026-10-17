@@ -11,18 +11,22 @@ namespace
 {
 	// Shared by the committed shot and the read-only next-shot display.
 	float ResolveTotalSpreadAngle(const FWeaponSpreadProfile& Profile, float CurrentHorizontalSpeed,
-		bool bIsFalling, bool bIsCrouched, bool bIsSlowWalking, float FiringSpread)
+		bool bIsFalling, bool /*bIsCrouched*/, bool bIsSlowWalking, float FiringSpread)
 	{
 		const float SafeCurrentHorizontalSpeed = FMath::Max(0.0f, CurrentHorizontalSpeed);
 		const float SafeMovementSpreadSpeedThreshold = FMath::Max(0.0f, Profile.MovementSpreadSpeedThreshold);
+		if (Profile.bUseAdditiveStateSpread)
+		{
+			const auto Safe = [](float V) { return FMath::IsFinite(V) ? FMath::Max(0.0f, V) : 0.0f; };
+			const float MovementExtra = SafeCurrentHorizontalSpeed > SafeMovementSpreadSpeedThreshold
+				? Safe(bIsSlowWalking && !bIsFalling ? Profile.SlowWalkSpreadAngle : Profile.MovingSpreadAngle) : 0.0f;
+			return FMath::Clamp(Safe(Profile.StationarySpreadAngle) + MovementExtra
+				+ (bIsFalling ? Safe(Profile.JumpSpreadAngle) : 0.0f) + Safe(FiringSpread), 0.0f, 89.0f);
+		}
 		float SelectedSpreadAngle = Profile.MovingSpreadAngle;
 		if (bIsFalling)
 		{
 			SelectedSpreadAngle = Profile.JumpSpreadAngle;
-		}
-		else if (bIsCrouched)
-		{
-			SelectedSpreadAngle = Profile.StationarySpreadAngle;
 		}
 		else if (SafeCurrentHorizontalSpeed <= SafeMovementSpreadSpeedThreshold)
 		{
@@ -615,6 +619,10 @@ void AWeaponRuntime::ApplyDefinitionSettings()
 void AWeaponRuntime::CaptureDefinition(UWeaponDefinitionData* D) const
 {
 	if (!D) return;
+	D->bUseIntuitiveHipAccuracy = WeaponDefinition && WeaponDefinition->bUseIntuitiveHipAccuracy;
+	D->HipAccuracy = WeaponDefinition ? WeaponDefinition->HipAccuracy : FWeaponIntuitiveAccuracy{};
+	D->bUseIntuitiveAimAccuracy = WeaponDefinition && WeaponDefinition->bUseIntuitiveAimAccuracy;
+	D->AimAccuracy = WeaponDefinition ? WeaponDefinition->AimAccuracy : FWeaponIntuitiveAccuracy{};
 	D->bUseAimingSpread = WeaponDefinition && WeaponDefinition->bUseAimingSpread;
 	D->AimingSpread = WeaponDefinition ? WeaponDefinition->AimingSpread : FWeaponSpreadProfile{};
 	D->bIgnoreShotRecoilWhenAiming = WeaponDefinition && WeaponDefinition->bIgnoreShotRecoilWhenAiming;
@@ -656,7 +664,11 @@ float AWeaponRuntime::GetCurrentTotalSpreadAngle(float CurrentHorizontalSpeed,
 FWeaponSpreadProfile AWeaponRuntime::GetSpreadProfile(bool bAiming) const
 {
 	if (bAiming && WeaponDefinition && WeaponDefinition->bUseAimingSpread)
-  return WeaponDefinition->AimingSpread;
+		return WeaponDefinition->bUseIntuitiveAimAccuracy
+			? WeaponDefinition->AimAccuracy.BuildProfile(GetEffectiveFireInterval(), MovementSpreadSpeedThreshold)
+			: WeaponDefinition->AimingSpread;
+	if (WeaponDefinition && WeaponDefinition->bUseIntuitiveHipAccuracy)
+		return WeaponDefinition->HipAccuracy.BuildProfile(GetEffectiveFireInterval(), MovementSpreadSpeedThreshold);
 	FWeaponSpreadProfile P;
 	P.StationarySpreadAngle = StationarySpreadAngle;
 	P.MovingSpreadAngle = MovingSpreadAngle;

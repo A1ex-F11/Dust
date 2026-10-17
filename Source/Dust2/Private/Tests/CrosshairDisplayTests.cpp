@@ -150,4 +150,18 @@ bool FCrosshairFramePartitionTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCrosshairVisualGainTest,
+    "Dust2.Crosshair.Display.FiringFeedbackDoesNotAmplifyBase",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FCrosshairVisualGainTest::RunTest(const FString& Parameters)
+{
+    TestEqual(TEXT("Scale one preserves true total angle"), FCrosshairDisplayAngle::WithFiringFeedback(4, 1, 1), 4.0f);
+    TestEqual(TEXT("Scale two doubles only bloom"), FCrosshairDisplayAngle::WithFiringFeedback(4, 1, 2), 5.0f);
+    TestEqual(TEXT("Movement without bloom is unchanged"), FCrosshairDisplayAngle::WithFiringFeedback(12, 0, 3), 12.0f);
+    TestEqual(TEXT("Display cone bounded"), FCrosshairDisplayAngle::WithFiringFeedback(80, 50, 3), 89.0f);
+    TestEqual(TEXT("Bad multiplier defaults to true precision"), FCrosshairDisplayAngle::WithFiringFeedback(4, 1,
+        std::numeric_limits<float>::quiet_NaN()), 4.0f);
+    return true;
+}
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -14,6 +14,9 @@ USTRUCT(BlueprintType)
 struct DUST2_API FWeaponSpreadProfile
 {
 	GENERATED_BODY()
+	// Runtime semantic flag; old serialized profiles keep their absolute-angle interpretation.
+	UPROPERTY()
+	bool bUseAdditiveStateSpread = false;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="静止散布角度", ClampMin="0.0"))
 	float StationarySpreadAngle = 0.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="移动散布角度", ClampMin="0.0"))
@@ -36,6 +39,29 @@ struct DUST2_API FWeaponSpreadProfile
 	float SpreadRecoverySpeed = 1.5f;
 };
 
+/** Author-facing tuning: the runtime derives per-shot growth and recovery rate. */
+USTRUCT(BlueprintType)
+struct DUST2_API FWeaponIntuitiveAccuracy
+{
+	GENERATED_BODY()
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="基础散布", ClampMin="0.0", ClampMax="89.0", ToolTip="站稳且射击累计恢复完的圆锥半角，单位度；是姿态叠加的下限。"))
+	float BaseSpreadAngle = 0.2f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="走动额外散布", ClampMin="0.0", ToolTip="超过移动速度阈值时叠加的角度，不替换基础。"))
+	float MovingExtraAngle = 2.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="静步额外散布", ClampMin="0.0", ToolTip="地面静步的移动惩罚；空中仍使用普通移动惩罚。"))
+	float SlowWalkExtraAngle = 0.5f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="空中额外散布", ClampMin="0.0", ToolTip="离地时独立叠加，可与水平移动同时生效。"))
+	float AirborneExtraAngle = 6.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="最大射击额外散布", ClampMin="0.0", ToolTip="仅连续射击累计项的上限；0关闭射击累计，不改变固定后坐轨迹。"))
+	float MaxFiringExtraAngle = 0.6f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="连续到顶参考发数", ClampMin="1", ClampMax="1000", ToolTip="按当前射击模式的最短相邻间隔反推单发增量，已计入两枪间恢复。慢点射/三连发组间等待会改变实际到顶发数；恢复时间不大于相邻间隔时无法跨发累计。"))
+	int32 ShotsToMaximum = 12;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="满累计恢复秒数", ClampMin="0.01", ToolTip="停火后从最大射击累计恢复到0的秒数；无等待延迟，不包含固定后坐和基础姿态项。"))
+	float FullRecoverySeconds = 1.2f;
+
+	FWeaponSpreadProfile BuildProfile(float ShotInterval, float MovementThreshold) const;
+};
+
 /** A single editable gameplay configuration for one weapon. */
 UCLASS(BlueprintType, meta = (DisplayName = "枪械玩法配置"))
 class DUST2_API UWeaponDefinitionData : public UDataAsset
@@ -44,11 +70,23 @@ class DUST2_API UWeaponDefinitionData : public UDataAsset
 
 public:
 	UWeaponDefinitionData();
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="枪械配置|精度（常用）",
+		meta=(DisplayName="使用直观腰射精度", ToolTip="启用新叠加规则：基础+移动+空中+射击累计。旧参数仍保留，取消可回退；启用后按本片迁移表填写，不自动重解释旧数值。"))
+	bool bUseIntuitiveHipAccuracy = false;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="枪械配置|精度（常用）",
+		meta=(DisplayName="腰射精度", EditCondition="bUseIntuitiveHipAccuracy", EditConditionHides))
+	FWeaponIntuitiveAccuracy HipAccuracy;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="枪械配置|瞄准散布",
+		meta=(DisplayName="使用直观瞄准精度", EditCondition="bUseAimingSpread", EditConditionHides, ToolTip="可选。默认保留旧右键配置；不要为了腰射调整覆盖已确认的狙击瞄准精度。"))
+	bool bUseIntuitiveAimAccuracy = false;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="枪械配置|瞄准散布",
+		meta=(DisplayName="瞄准精度", EditCondition="bUseAimingSpread && bUseIntuitiveAimAccuracy", EditConditionHides))
+	FWeaponIntuitiveAccuracy AimAccuracy;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="枪械配置|瞄准散布",
 		meta=(DisplayName="启用独立瞄准散布", ToolTip="开启后右键使用下方配置；关闭时腰射与瞄准沿用原有散布。旧资产默认关闭，不自动覆盖原数值。"))
 	bool bUseAimingSpread = false;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="枪械配置|瞄准散布",
-		meta=(DisplayName="右键瞄准散布参数", EditCondition="bUseAimingSpread"))
+		meta=(DisplayName="右键瞄准散布参数", EditCondition="bUseAimingSpread && !bUseIntuitiveAimAccuracy", EditConditionHides))
 	FWeaponSpreadProfile AimingSpread;
 	// Serialized legacy field only. ADS now always follows the input view direction.
 	UPROPERTY()
@@ -95,43 +133,43 @@ public:
 	TObjectPtr<UWeaponBallisticsData> BallisticsData;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射散布",
-		meta = (DisplayName = "静止散布角度", ClampMin = "0.0", ToolTip = "水平速度低于阈值时使用的基础散布角度；保留旧逻辑的蹲姿分支也使用此值，单位为度。"))
+		meta = (DisplayName = "静止散布角度", ClampMin = "0.0", ToolTip = "水平速度低于阈值时使用的基础散布角度；保留旧逻辑的蹲姿分支也使用此值，单位为度。", EditCondition="!bUseIntuitiveHipAccuracy", EditConditionHides))
 	float StationarySpreadAngle = 0.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射散布",
-		meta = (DisplayName = "移动散布角度", ClampMin = "0.0", ToolTip = "普通移动时使用的基础散布角度，单位为度。"))
+		meta = (DisplayName = "移动散布角度", ClampMin = "0.0", ToolTip = "普通移动时使用的基础散布角度，单位为度。", EditCondition="!bUseIntuitiveHipAccuracy", EditConditionHides))
 	float MovingSpreadAngle = 3.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射散布",
-		meta = (DisplayName = "跳跃散布角度", ClampMin = "0.0", ToolTip = "角色处于空中时使用的基础散布角度，单位为度。"))
+		meta = (DisplayName = "跳跃散布角度", ClampMin = "0.0", ToolTip = "角色处于空中时使用的基础散布角度，单位为度。", EditCondition="!bUseIntuitiveHipAccuracy", EditConditionHides))
 	float JumpSpreadAngle = 12.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射散布",
-		meta = (DisplayName = "慢走散布角度", ClampMin = "0.0", ToolTip = "角色处于慢走状态时使用的基础散布角度，单位为度。"))
+		meta = (DisplayName = "慢走散布角度", ClampMin = "0.0", ToolTip = "角色处于慢走状态时使用的基础散布角度，单位为度。", EditCondition="!bUseIntuitiveHipAccuracy", EditConditionHides))
 	float SlowWalkSpreadAngle = 1.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射散布",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|精度（常用）", AdvancedDisplay,
 		meta = (DisplayName = "移动散布速度阈值", ClampMin = "0.0", ToolTip = "水平速度不超过该值时按静止散布处理，单位与角色移动速度一致。"))
 	float MovementSpreadSpeedThreshold = 10.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射连续射击散布",
-		meta = (DisplayName = "启用连续射击散布", ToolTip = "开启后，连续成功射击会逐发增加散布，停火后按恢复参数逐渐收回。"))
+		meta = (DisplayName = "启用连续射击散布", ToolTip = "开启后，连续成功射击会逐发增加散布，停火后按恢复参数逐渐收回。", EditCondition="!bUseIntuitiveHipAccuracy", EditConditionHides))
 	bool bUseFiringSpread = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射连续射击散布",
-		meta = (DisplayName = "每发增加散布", ClampMin = "0.0", ToolTip = "每次成功射击后增加的散布角度，单位为度。"))
+		meta = (DisplayName = "每发增加散布", ClampMin = "0.0", ToolTip = "每次成功射击后增加的散布角度，单位为度。", EditCondition="!bUseIntuitiveHipAccuracy", EditConditionHides))
 	float SpreadPerShot = 0.15f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射连续射击散布",
-		meta = (DisplayName = "连续射击散布上限", ClampMin = "0.0", ToolTip = "连续射击额外增加的散布最大值，单位为度。"))
+		meta = (DisplayName = "连续射击散布上限", ClampMin = "0.0", ToolTip = "连续射击额外增加的散布最大值，单位为度。", EditCondition="!bUseIntuitiveHipAccuracy", EditConditionHides))
 	float MaxFiringSpread = 0.8f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射连续射击散布",
-		meta = (DisplayName = "连续射击散布恢复延迟", ClampMin = "0.0", ToolTip = "停火后等待多久开始恢复连续射击散布，单位为秒。"))
+		meta = (DisplayName = "连续射击散布恢复延迟", ClampMin = "0.0", ToolTip = "停火后等待多久开始恢复连续射击散布，单位为秒。", EditCondition="!bUseIntuitiveHipAccuracy", EditConditionHides))
 	float SpreadRecoveryDelay = 0.2f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|腰射连续射击散布",
-		meta = (DisplayName = "连续射击散布恢复速度", ClampMin = "0.0", ToolTip = "延迟结束后每秒减少的散布角度，单位为度/秒。"))
+		meta = (DisplayName = "连续射击散布恢复速度", ClampMin = "0.0", ToolTip = "延迟结束后每秒减少的散布角度，单位为度/秒。", EditCondition="!bUseIntuitiveHipAccuracy", EditConditionHides))
 	float SpreadRecoverySpeed = 2.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Instanced, Category = "枪械配置|后坐",
