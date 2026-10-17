@@ -584,7 +584,7 @@ void AWeaponRuntime::PostInitializeComponents()
    CurrentAmmo = FMath::Clamp(WeaponDefinition->InitialMagazineAmmo, 0, MagazineCapacity);
    ReserveAmmo = FMath::Max(0, WeaponDefinition->InitialReserveAmmo);
   }
-  if (!bRestoredFireMode) CurrentFireMode = WeaponDefinition->DefaultFireMode;
+  if (!bRestoredFireMode) CurrentFireMode = WeaponDefinition->GetInitialFireMode();
   bInitialDefinitionApplied = true;
 	}
 }
@@ -605,8 +605,8 @@ void AWeaponRuntime::ApplyDefinitionSettings()
 	SlowWalkSpreadAngle = NonNegative(D->SlowWalkSpreadAngle);
 	MovementSpreadSpeedThreshold = NonNegative(D->MovementSpreadSpeedThreshold);
 	bLockReloadAmountAtStart = D->bLockReloadAmountAtStart;
-	bReloadOneRoundAtATime = D->bReloadOneRoundAtATime;
-	bUseBatchReloadForFullEmptyReload = D->bUseBatchReloadForFullEmptyReload;
+	bReloadOneRoundAtATime = D->UsesPerRoundReload();
+	bUseBatchReloadForFullEmptyReload = D->UsesEmptyBatchReload();
 	// Existing Blueprint readers remain compatible; only the definition owns static data.
 	if (FObjectPropertyBase* P = FindFProperty<FObjectPropertyBase>(GetClass(), TEXT("BallisticsData")))
 	{
@@ -619,16 +619,23 @@ void AWeaponRuntime::ApplyDefinitionSettings()
 void AWeaponRuntime::CaptureDefinition(UWeaponDefinitionData* D) const
 {
 	if (!D) return;
-	D->bUseIntuitiveHipAccuracy = WeaponDefinition && WeaponDefinition->bUseIntuitiveHipAccuracy;
+	D->bUseIntuitiveHipAccuracy = WeaponDefinition && (WeaponDefinition->HasUnifiedConfiguration() || WeaponDefinition->bUseIntuitiveHipAccuracy);
 	D->HipAccuracy = WeaponDefinition ? WeaponDefinition->HipAccuracy : FWeaponIntuitiveAccuracy{};
-	D->bUseIntuitiveAimAccuracy = WeaponDefinition && WeaponDefinition->bUseIntuitiveAimAccuracy;
+	D->bUseIntuitiveAimAccuracy = WeaponDefinition && (WeaponDefinition->HasUnifiedConfiguration() || WeaponDefinition->bUseIntuitiveAimAccuracy);
 	D->AimAccuracy = WeaponDefinition ? WeaponDefinition->AimAccuracy : FWeaponIntuitiveAccuracy{};
 	D->bUseAimingSpread = WeaponDefinition && WeaponDefinition->bUseAimingSpread;
 	D->AimingSpread = WeaponDefinition ? WeaponDefinition->AimingSpread : FWeaponSpreadProfile{};
 	D->bIgnoreShotRecoilWhenAiming = WeaponDefinition && WeaponDefinition->bIgnoreShotRecoilWhenAiming;
 	D->WeaponDisplayName = WeaponDisplayName;
 	D->DefaultFireMode = CurrentFireMode;
+	D->ConfigurationVersion = WeaponDefinition ? WeaponDefinition->ConfigurationVersion : 0;
+	D->ReloadStyle = WeaponDefinition ? WeaponDefinition->ReloadStyle : EWeaponReloadStyle::Magazine;
 	D->AllowedFireModes = AllowedFireModes;
+	if(D->HasUnifiedConfiguration())
+	{
+		const int32 Start=D->AllowedFireModes.IndexOfByKey(CurrentFireMode);
+		if(Start>0) { const TArray<EFireMode> Old=D->AllowedFireModes; for(int32 I=0;I<Old.Num();++I) D->AllowedFireModes[I]=Old[(Start+I)%Old.Num()]; }
+	}
 	D->MagazineCapacity = MagazineCapacity;
 	D->InitialMagazineAmmo = CurrentAmmo;
 	D->InitialReserveAmmo = ReserveAmmo;
@@ -664,10 +671,10 @@ float AWeaponRuntime::GetCurrentTotalSpreadAngle(float CurrentHorizontalSpeed,
 FWeaponSpreadProfile AWeaponRuntime::GetSpreadProfile(bool bAiming) const
 {
 	if (bAiming && WeaponDefinition && WeaponDefinition->bUseAimingSpread)
-		return WeaponDefinition->bUseIntuitiveAimAccuracy
+		return (WeaponDefinition->HasUnifiedConfiguration() || WeaponDefinition->bUseIntuitiveAimAccuracy)
 			? WeaponDefinition->AimAccuracy.BuildProfile(GetEffectiveFireInterval(), MovementSpreadSpeedThreshold)
 			: WeaponDefinition->AimingSpread;
-	if (WeaponDefinition && WeaponDefinition->bUseIntuitiveHipAccuracy)
+	if (WeaponDefinition && (WeaponDefinition->HasUnifiedConfiguration() || WeaponDefinition->bUseIntuitiveHipAccuracy))
 		return WeaponDefinition->HipAccuracy.BuildProfile(GetEffectiveFireInterval(), MovementSpreadSpeedThreshold);
 	FWeaponSpreadProfile P;
 	P.StationarySpreadAngle = StationarySpreadAngle;

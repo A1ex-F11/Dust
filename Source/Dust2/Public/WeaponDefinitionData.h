@@ -6,6 +6,7 @@
 #include "Engine/DataAsset.h"
 #include "FireMode.h"
 #include "WeaponRecoilData.h"
+#include "WeaponAccuracyPreset.h"
 #include "WeaponDefinitionData.generated.h"
 
 class UWeaponBallisticsData;
@@ -15,7 +16,7 @@ struct DUST2_API FWeaponSpreadProfile
 {
 	GENERATED_BODY()
 	// Runtime semantic flag; old serialized profiles keep their absolute-angle interpretation.
-	UPROPERTY()
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	bool bUseAdditiveStateSpread = false;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="静止散布角度", ClampMin="0.0"))
 	float StationarySpreadAngle = 0.0f;
@@ -46,11 +47,11 @@ struct DUST2_API FWeaponIntuitiveAccuracy
 	GENERATED_BODY()
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="基础散布", ClampMin="0.0", ClampMax="89.0", ToolTip="站稳且射击累计恢复完的圆锥半角，单位度；是姿态叠加的下限。"))
 	float BaseSpreadAngle = 0.2f;
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="走动额外散布", ClampMin="0.0", ToolTip="超过移动速度阈值时叠加的角度，不替换基础。"))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	float MovingExtraAngle = 2.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="静步额外散布", ClampMin="0.0", ToolTip="地面静步的移动惩罚；空中仍使用普通移动惩罚。"))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	float SlowWalkExtraAngle = 0.5f;
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="空中额外散布", ClampMin="0.0", ToolTip="离地时独立叠加，可与水平移动同时生效。"))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	float AirborneExtraAngle = 6.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="最大射击额外散布", ClampMin="0.0", ToolTip="仅连续射击累计项的上限；0关闭射击累计，不改变固定后坐轨迹。"))
 	float MaxFiringExtraAngle = 0.6f;
@@ -59,6 +60,20 @@ struct DUST2_API FWeaponIntuitiveAccuracy
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="满累计恢复秒数", ClampMin="0.01", ToolTip="停火后从最大射击累计恢复到0的秒数；无等待延迟，不包含固定后坐和基础姿态项。"))
 	float FullRecoverySeconds = 1.2f;
 
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="姿态精度预设"))
+	TObjectPtr<UWeaponAccuracyPreset> PosturePreset;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="覆盖姿态预设", EditCondition="PosturePreset != nullptr", EditConditionHides))
+	bool bOverridePosture = false;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(DisplayName="独立姿态参数", EditCondition="PosturePreset == nullptr || bOverridePosture", EditConditionHides))
+	FWeaponPostureSettings PostureOverride;
+	// Compatibility data is serialized, never a second editable configuration.
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据") bool bUsePostureSettings = false;
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据") bool bPreserveMigratedFiring = false;
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据") FWeaponSpreadProfile MigratedFiring;
+	FWeaponPostureSettings GetPosture(float LegacyThreshold) const;
+	void MigratePosture(float LegacyThreshold);
+	static FWeaponIntuitiveAccuracy FromLegacy(const FWeaponSpreadProfile& Profile, float Interval);
 	FWeaponSpreadProfile BuildProfile(float ShotInterval, float MovementThreshold) const;
 };
 
@@ -70,38 +85,48 @@ class DUST2_API UWeaponDefinitionData : public UDataAsset
 
 public:
 	UWeaponDefinitionData();
-	UPROPERTY(EditAnywhere, AdvancedDisplay, BlueprintReadOnly, Category="枪械配置|精度",
-		meta=(DisplayName="使用直观腰射精度", ToolTip="启用新叠加规则：基础+移动+空中+射击累计。旧参数仍保留，取消可回退；启用后按本片迁移表填写，不自动重解释旧数值。"))
+	virtual void PostLoad() override;
+#if WITH_EDITOR
+	virtual void PreEditChange(FProperty* PropertyAboutToChange) override;
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override;
+#endif
+	void MigrateConfiguration();
+	EFireMode GetInitialFireMode() const;
+	bool UsesPerRoundReload() const;
+	bool UsesEmptyBatchReload() const;
+	bool HasUnifiedConfiguration() const { return ConfigurationVersion >= 1; }
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据") int32 ConfigurationVersion = 0;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="枪械配置|弹药与装填", meta=(DisplayName="装填方式"))
+	EWeaponReloadStyle ReloadStyle = EWeaponReloadStyle::Magazine;
+
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	bool bUseIntuitiveHipAccuracy = false;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="枪械配置|精度",
-		meta=(DisplayName="腰射精度", EditCondition="bUseIntuitiveHipAccuracy", EditConditionHides))
+		meta=(DisplayName="腰射精度"))
 	FWeaponIntuitiveAccuracy HipAccuracy;
-	UPROPERTY(EditAnywhere, AdvancedDisplay, BlueprintReadOnly, Category="枪械配置|精度",
-		meta=(DisplayName="使用直观瞄准精度", EditCondition="bUseAimingSpread", EditConditionHides, ToolTip="可选。默认保留旧右键配置；不要为了腰射调整覆盖已确认的狙击瞄准精度。"))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	bool bUseIntuitiveAimAccuracy = false;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="枪械配置|精度",
-		meta=(DisplayName="瞄准精度", EditCondition="bUseAimingSpread && bUseIntuitiveAimAccuracy", EditConditionHides))
+		meta=(DisplayName="瞄准精度", EditCondition="bUseAimingSpread", EditConditionHides))
 	FWeaponIntuitiveAccuracy AimAccuracy;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="枪械配置|精度",
 		meta=(DisplayName="启用独立瞄准散布", ToolTip="开启后右键使用下方配置；关闭时腰射与瞄准沿用原有散布。旧资产默认关闭，不自动覆盖原数值。"))
 	bool bUseAimingSpread = false;
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="枪械配置|精度",
-		meta=(DisplayName="瞄准精度（兼容配置）", EditCondition="bUseAimingSpread && !bUseIntuitiveAimAccuracy", EditConditionHides))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	FWeaponSpreadProfile AimingSpread;
 	// Serialized legacy field only. ADS now always follows the input view direction.
-	UPROPERTY()
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	bool bIgnoreShotRecoilWhenAiming = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|基础与开火",
 		meta = (DisplayName = "武器展示名", ToolTip = "用于界面和武器展示的名称。迁移时复制原武器蓝图中的实际名称。"))
 	FText WeaponDisplayName;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|基础与开火",
-		meta = (DisplayName = "默认开火模式", ToolTip = "武器生成时使用的开火模式；必须包含在允许的开火模式中。"))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	EFireMode DefaultFireMode = EFireMode::SemiAutomatic;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|基础与开火",
-		meta = (DisplayName = "允许的开火模式", ToolTip = "玩家可以在这把枪上切换的开火模式。"))
+		meta = (DisplayName = "开火模式（首项为初始）", ToolTip = "按列表顺序循环；第一项是新武器初始模式，存档恢复优先。"))
 	TArray<EFireMode> AllowedFireModes = { EFireMode::SemiAutomatic };
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|基础与开火",
@@ -132,44 +157,34 @@ public:
 		meta = (DisplayName = "伤害与弹道参数", ToolTip = "展开后可在此编辑单发伤害、护甲穿透、爆头倍率和射线距离；迁移时复制原弹道资产的实际值。"))
 	TObjectPtr<UWeaponBallisticsData> BallisticsData;
 
-	UPROPERTY(EditAnywhere, AdvancedDisplay, BlueprintReadOnly, Category = "枪械配置|精度",
-		meta = (DisplayName = "静止散布角度", ClampMin = "0.0", ToolTip = "旧配置：水平速度低于阈值时使用的散布角度，单位为度；不包含蹲姿加成。", EditCondition="!bUseIntuitiveHipAccuracy", EditConditionHides))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	float StationarySpreadAngle = 0.0f;
 
-	UPROPERTY(EditAnywhere, AdvancedDisplay, BlueprintReadOnly, Category = "枪械配置|精度",
-		meta = (DisplayName = "移动散布角度", ClampMin = "0.0", ToolTip = "普通移动时使用的基础散布角度，单位为度。", EditCondition="!bUseIntuitiveHipAccuracy", EditConditionHides))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	float MovingSpreadAngle = 3.0f;
 
-	UPROPERTY(EditAnywhere, AdvancedDisplay, BlueprintReadOnly, Category = "枪械配置|精度",
-		meta = (DisplayName = "跳跃散布角度", ClampMin = "0.0", ToolTip = "角色处于空中时使用的基础散布角度，单位为度。", EditCondition="!bUseIntuitiveHipAccuracy", EditConditionHides))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	float JumpSpreadAngle = 12.0f;
 
-	UPROPERTY(EditAnywhere, AdvancedDisplay, BlueprintReadOnly, Category = "枪械配置|精度",
-		meta = (DisplayName = "慢走散布角度", ClampMin = "0.0", ToolTip = "角色处于慢走状态时使用的基础散布角度，单位为度。", EditCondition="!bUseIntuitiveHipAccuracy", EditConditionHides))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	float SlowWalkSpreadAngle = 1.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|精度", AdvancedDisplay,
-		meta = (DisplayName = "移动散布速度阈值", ClampMin = "0.0", ToolTip = "水平速度不超过该值时按静止散布处理，单位与角色移动速度一致。"))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	float MovementSpreadSpeedThreshold = 10.0f;
 
-	UPROPERTY(EditAnywhere, AdvancedDisplay, BlueprintReadOnly, Category = "枪械配置|精度",
-		meta = (DisplayName = "启用连续射击散布", ToolTip = "开启后，连续成功射击会逐发增加散布，停火后按恢复参数逐渐收回。", EditCondition="!bUseIntuitiveHipAccuracy", EditConditionHides))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	bool bUseFiringSpread = false;
 
-	UPROPERTY(EditAnywhere, AdvancedDisplay, BlueprintReadOnly, Category = "枪械配置|精度",
-		meta = (DisplayName = "每发增加散布", ClampMin = "0.0", ToolTip = "每次成功射击后增加的散布角度，单位为度。", EditCondition="!bUseIntuitiveHipAccuracy && bUseFiringSpread", EditConditionHides))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	float SpreadPerShot = 0.15f;
 
-	UPROPERTY(EditAnywhere, AdvancedDisplay, BlueprintReadOnly, Category = "枪械配置|精度",
-		meta = (DisplayName = "连续射击散布上限", ClampMin = "0.0", ToolTip = "连续射击额外增加的散布最大值，单位为度。", EditCondition="!bUseIntuitiveHipAccuracy && bUseFiringSpread", EditConditionHides))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	float MaxFiringSpread = 0.8f;
 
-	UPROPERTY(EditAnywhere, AdvancedDisplay, BlueprintReadOnly, Category = "枪械配置|精度",
-		meta = (DisplayName = "连续射击散布恢复延迟", ClampMin = "0.0", ToolTip = "停火后等待多久开始恢复连续射击散布，单位为秒。", EditCondition="!bUseIntuitiveHipAccuracy && bUseFiringSpread", EditConditionHides))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	float SpreadRecoveryDelay = 0.2f;
 
-	UPROPERTY(EditAnywhere, AdvancedDisplay, BlueprintReadOnly, Category = "枪械配置|精度",
-		meta = (DisplayName = "连续射击散布恢复速度", ClampMin = "0.0", ToolTip = "延迟结束后每秒减少的散布角度，单位为度/秒。", EditCondition="!bUseIntuitiveHipAccuracy && bUseFiringSpread", EditConditionHides))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	float SpreadRecoverySpeed = 2.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Instanced, Category = "枪械配置|后坐与镜头",
@@ -180,11 +195,9 @@ public:
 		meta = (DisplayName = "开始换弹时锁定装弹数量", ToolTip = "换弹开始时固定本次预计装入的子弹数，避免换弹途中备用弹变化导致数量改变。"))
 	bool bLockReloadAmountAtStart = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|弹药与装填",
-		meta = (DisplayName = "逐颗装入弹药", ToolTip = "开启后按每发换弹通知逐颗装入弹药。"))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	bool bReloadOneRoundAtATime = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "枪械配置|弹药与装填",
-		meta = (EditCondition="bReloadOneRoundAtATime", EditConditionHides, DisplayName="全空且备弹充足时整批装入", ToolTip = "开启逐颗装弹时，若空仓且备用弹足以装满弹匣，则允许一次装入全部计划弹药。"))
+	UPROPERTY(BlueprintReadOnly, Category="兼容数据")
 	bool bUseBatchReloadForFullEmptyReload = false;
 };

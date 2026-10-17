@@ -2,6 +2,8 @@
 
 
 #include "WeaponRecoilData.h"
+#include "Math/UnrealMathUtility.h"
+
 UWeaponRecoilData::UWeaponRecoilData()
 	:bUseFixedPattern(false)
 	, PatternResetDelay(0.25f)
@@ -19,3 +21,53 @@ UWeaponRecoilData::UWeaponRecoilData()
 {
 
 }
+
+bool UWeaponRecoilData::MigrateCameraFeedbackToPreset(UWeaponCameraFeedbackPreset* Preset)
+{
+	if (!Preset || bOverrideCameraFeedback ||
+		!FMath::IsFinite(CameraReturnSpeed) || !FMath::IsFinite(SmoothKickDuration) ||
+		!FMath::IsFinite(ImmediateKickFraction) || !FMath::IsFinite(Preset->ReturnSpeed) ||
+		!FMath::IsFinite(Preset->SmoothKickDuration) || !FMath::IsFinite(Preset->ImmediateKickFraction))
+	{
+		return false;
+	}
+
+	constexpr float MatchTolerance = 0.0001f;
+	if (!FMath::IsNearlyEqual(CameraReturnSpeed, Preset->ReturnSpeed, MatchTolerance) ||
+		!FMath::IsNearlyEqual(SmoothKickDuration, Preset->SmoothKickDuration, MatchTolerance) ||
+		!FMath::IsNearlyEqual(ImmediateKickFraction, Preset->ImmediateKickFraction, MatchTolerance))
+	{
+		return false;
+	}
+
+	CameraFeedbackPreset = Preset;
+	return true;
+}
+
+float UWeaponRecoilData::GetCameraReturnSpeed() const
+{
+	if (bOverrideCameraFeedback)
+	{
+		return CameraFeedbackOverrides.ReturnSpeed;
+	}
+	return CameraFeedbackPreset ? CameraFeedbackPreset->ReturnSpeed : CameraReturnSpeed;
+}
+
+float UWeaponRecoilData::GetSmoothKickDuration() const
+{
+	if (bOverrideCameraFeedback)
+	{
+		return CameraFeedbackOverrides.SmoothKickDuration;
+	}
+	return CameraFeedbackPreset ? CameraFeedbackPreset->SmoothKickDuration : SmoothKickDuration;
+}
+
+float UWeaponRecoilData::GetImmediateKickFraction() const
+{
+	if (bOverrideCameraFeedback)
+	{
+		return CameraFeedbackOverrides.ImmediateKickFraction;
+	}
+	return CameraFeedbackPreset ? CameraFeedbackPreset->ImmediateKickFraction : ImmediateKickFraction;
+}
+

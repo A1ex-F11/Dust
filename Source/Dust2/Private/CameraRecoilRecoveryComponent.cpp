@@ -55,9 +55,9 @@ void UCameraRecoilRecoveryComponent::ApplyRecoilKickWithData(
     ActiveRecoveryRatio = FMath::IsFinite(RecoilSettings->RecoveryPitchRatio)
         ? FMath::Clamp(RecoilSettings->RecoveryPitchRatio, 0.0f, 1.0f) : 0.0f;
     QueueKick(PitchKick, YawKick,
-        SafeNonNegative(RecoilSettings->SmoothKickDuration),
-        FMath::IsFinite(RecoilSettings->ImmediateKickFraction)
-            ? FMath::Clamp(RecoilSettings->ImmediateKickFraction, 0.0f, 1.0f) : 1.0f,
+        SafeNonNegative(RecoilSettings->GetSmoothKickDuration()),
+        FMath::IsFinite(RecoilSettings->GetImmediateKickFraction())
+            ? FMath::Clamp(RecoilSettings->GetImmediateKickFraction(), 0.0f, 1.0f) : 1.0f,
         !RecoilSettings->bUseFixedPattern);
 }
 
@@ -315,9 +315,9 @@ void UCameraRecoilRecoveryComponent::ApplyRecoilWithCamera(float PitchKick, floa
             ? FMath::Clamp(RecoilSettings->RecoveryPitchRatio, 0.0f, 1.0f) : 0.0f;
         const float Scale = SafeNonNegative(RecoilSettings->AimingRecoilScale);
         QueueKick(PitchKick * Scale, YawKick * Scale,
-            SafeNonNegative(RecoilSettings->SmoothKickDuration),
-            FMath::IsFinite(RecoilSettings->ImmediateKickFraction)
-                ? FMath::Clamp(RecoilSettings->ImmediateKickFraction, 0.0f, 1.0f) : 1.0f,
+            SafeNonNegative(RecoilSettings->GetSmoothKickDuration()),
+            FMath::IsFinite(RecoilSettings->GetImmediateKickFraction())
+                ? FMath::Clamp(RecoilSettings->GetImmediateKickFraction(), 0.0f, 1.0f) : 1.0f,
             false);
         return;
     }
@@ -335,11 +335,11 @@ void UCameraRecoilRecoveryComponent::ApplyRecoilWithCamera(float PitchKick, floa
     }
     const float Scale = FMath::IsFinite(RecoilSettings->CameraFeedbackScale)
         ? FMath::Max(0.0f, RecoilSettings->CameraFeedbackScale) : 0.0f;
-    VisualReturnSpeed = FMath::Max(0.1f, SafeNonNegative(RecoilSettings->CameraReturnSpeed, 12.0f));
+    VisualReturnSpeed = FMath::Max(0.1f, SafeNonNegative(RecoilSettings->GetCameraReturnSpeed(), 12.0f));
     const FVector2D Kick(FMath::Max(0.0f, PitchKick) * Scale, YawKick * Scale);
-    const float Duration = SafeNonNegative(RecoilSettings->SmoothKickDuration);
-    const float Immediate = FMath::IsFinite(RecoilSettings->ImmediateKickFraction)
-        ? FMath::Clamp(RecoilSettings->ImmediateKickFraction, 0.0f, 1.0f) : 1.0f;
+    const float Duration = SafeNonNegative(RecoilSettings->GetSmoothKickDuration());
+    const float Immediate = FMath::IsFinite(RecoilSettings->GetImmediateKickFraction())
+        ? FMath::Clamp(RecoilSettings->GetImmediateKickFraction(), 0.0f, 1.0f) : 1.0f;
     VisualOffset += Duration <= KINDA_SMALL_NUMBER ? Kick : Kick * Immediate;
     if (Duration > KINDA_SMALL_NUMBER)
     {
