@@ -25,7 +25,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FPresentationSwitchCommitEvent,
 	AWeaponRuntime*, FormalWeapon);
-UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
+UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent, DisplayName="武器表现组件") )
 class DUST2_API UWeaponPresentationComponent : public UActorComponent
 {
 	GENERATED_BODY()
@@ -33,88 +33,88 @@ public:
 	UWeaponPresentationComponent();
 	// Read-only estimate from the actual watched final draw instances; never grants readiness.
 	bool GetDrawRemainingForWeapon(AWeaponRuntime* ExpectedWeapon, float& OutSeconds) const;
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+UFUNCTION(BlueprintCallable, Category = "武器|表现")
 	void SetWeaponForPresentation(AWeaponRuntime* NewWeapon);
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+UFUNCTION(BlueprintCallable, Category = "武器|表现")
 	void PlayReloadPresentationAudio(
 		UAudioComponent* AudioComponent,
 		USoundBase* Sound);
-UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
+UFUNCTION(BlueprintPure, Category = "武器|表现")
 	UAnimMontage* ResolveWeaponFireMontage(
 		AWeaponRuntime* FormalWeapon,
 		UAnimMontage* DefaultFireMontage) const;
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+UFUNCTION(BlueprintCallable, Category = "武器|表现")
 	void PlayFirePresentation(
 		AWeaponRuntime* FormalWeapon,
 		USkeletalMeshComponent* CharacterMesh,
 		UAnimMontage* CharacterFireMontage,
 		USkeletalMeshComponent* WeaponMesh,
 		UAnimMontage* DefaultWeaponFireMontage);
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+UFUNCTION(BlueprintCallable, Category = "武器|表现")
 	AActor* TryInitializeVisualWeapon(
 		AWeaponRuntime* FormalWeapon,
 		UChildActorComponent* VisualWeaponComponent);
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+UFUNCTION(BlueprintCallable, Category = "武器|表现")
 	void PlayPresentationMontage(
 		USkeletalMeshComponent* Mesh,
 		UAnimMontage* Montage);
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
-		meta = (ReturnDisplayName = "Played"))
+UFUNCTION(BlueprintCallable, Category = "武器|表现",
+		meta = (ReturnDisplayName = "播放成功"))
 	bool TryPlayPresentationMontage(
 		USkeletalMeshComponent* Mesh,
 		UAnimMontage* Montage,
 		float StartTime = 0.0f);
-UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
-		meta = (ReturnDisplayName = "Use Fast Draw"))
+UFUNCTION(BlueprintPure, Category = "武器|表现",
+		meta = (ReturnDisplayName = "使用快速拔枪"))
 	bool ShouldUseFastDrawPresentation(
 		const FWeaponPresentationProfile& PresentationProfile,
 		bool bInitialDrawConsumed) const;
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+UFUNCTION(BlueprintCallable, Category = "武器|表现")
 	void PlayFastHolsterPresentation(
 		USkeletalMeshComponent* CharacterMesh,
 		const FWeaponPresentationProfile& Profile);
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
-		meta = (ReturnDisplayName = "Accepted"))
+UFUNCTION(BlueprintCallable, Category = "武器|表现",
+		meta = (ReturnDisplayName = "已接受"))
 	bool BeginPresentationSwitchCommit(
 		AWeaponRuntime* FormalWeapon,
 		float Delay);
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+UFUNCTION(BlueprintCallable, Category = "武器|表现")
 	void CancelPresentationSwitchCommit(bool bNotifyCancelled = true);
-UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
-		meta = (ReturnDisplayName = "Found"))
+UFUNCTION(BlueprintPure, Category = "武器|表现",
+		meta = (ReturnDisplayName = "已找到"))
 	bool FindWeaponPresentationProfile(
 		AWeaponRuntime* FormalWeapon,
 		FWeaponPresentationProfile& OutProfile) const;
-UFUNCTION(BlueprintPure, Category = "Weapon Presentation",
-		meta = (ReturnDisplayName = "Found"))
+UFUNCTION(BlueprintPure, Category = "武器|表现",
+		meta = (ReturnDisplayName = "已找到"))
 	bool ResolveStandardReloadPresentation(
 		AWeaponRuntime* FormalWeapon,
 		UAnimMontage* CharacterReloadTactical,
 		UAnimMontage* CharacterReloadEmpty,
 		FWeaponReloadVariant& OutPresentation) const;
 UFUNCTION(BlueprintCallable, BlueprintPure = false,
-		Category = "Weapon Presentation",
-		meta = (ReturnDisplayName = "Found"))
+		Category = "武器|表现",
+		meta = (ReturnDisplayName = "已找到"))
 	bool ResolveVariantReloadPresentation(
 		AWeaponRuntime* FormalWeapon,
 		int32 MagazineCapacity,
 		FWeaponReloadVariant& OutPresentation,
 		int32& OutPlannedReloadCount,
 		int32& OutReloadRequestId) const;
-UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
+UFUNCTION(BlueprintPure, Category = "武器|表现")
 	bool ShouldCompleteReloadPresentation(
 		bool bCompletionAllowed,
 		AWeaponRuntime* ReloadingWeapon,
 		AWeaponRuntime* CurrentWeapon,
 		int32 ExpectedReloadRequestId) const;
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+UFUNCTION(BlueprintCallable, Category = "武器|表现")
 	bool TryCommitReloadPresentationRound(
 		bool bCompletionAllowed,
 		AWeaponRuntime* ReloadingWeapon,
 		AWeaponRuntime* CurrentWeapon,
 		int32 ExpectedReloadRequestId);
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
-		meta = (ReturnDisplayName = "Round Committed"))
+UFUNCTION(BlueprintCallable, Category = "武器|表现",
+		meta = (ReturnDisplayName = "单发已提交"))
 	bool HandleReloadPresentationNotify(
 		FName NotifyName,
 		USceneComponent* AttachToComponent,
@@ -122,29 +122,29 @@ UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
 		AWeaponRuntime* ReloadingWeapon,
 		AWeaponRuntime* CurrentWeapon,
 		int32 ExpectedReloadRequestId);
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+UFUNCTION(BlueprintCallable, Category = "武器|表现")
 	void StopReloadPresentationSounds();
-UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
+UFUNCTION(BlueprintPure, Category = "武器|表现")
 	bool HasConsumedInitialDraw(AWeaponRuntime* FormalWeapon) const;
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+UFUNCTION(BlueprintCallable, Category = "武器|表现")
 	void MarkInitialDrawConsumed(AWeaponRuntime* FormalWeapon);
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
-		meta = (ReturnDisplayName = "Started"))
+UFUNCTION(BlueprintCallable, Category = "武器|表现",
+		meta = (ReturnDisplayName = "已开始"))
 	bool BeginFastDrawTransition(AWeaponRuntime* FormalWeapon, float Delay);
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+UFUNCTION(BlueprintCallable, Category = "武器|表现")
 	void CancelFastDrawTransition();
-UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
+UFUNCTION(BlueprintPure, Category = "武器|表现")
 	bool IsFastDrawTransitionPending() const;
-UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
+UFUNCTION(BlueprintPure, Category = "武器|表现")
 	bool CanStartReloadPresentation(
 		AWeaponRuntime* FormalWeapon,
 		bool bPresentationSwitching) const;
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+UFUNCTION(BlueprintCallable, Category = "武器|表现")
 	void PrepareDrawPresentationWatch();
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+UFUNCTION(BlueprintCallable, Category = "武器|表现")
 	void InterruptDrawPresentationWatch();
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
-		meta = (ReturnDisplayName = "Watching"))
+UFUNCTION(BlueprintCallable, Category = "武器|表现",
+		meta = (ReturnDisplayName = "已开始监听"))
 	bool WatchDrawPresentationCompletion(
 		AWeaponRuntime* FormalWeapon,
 		USkeletalMeshComponent* CharacterMesh,
@@ -152,45 +152,45 @@ UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
 		USkeletalMeshComponent* WeaponMesh,
 		UAnimMontage* WeaponMontage,
 		bool bFinalStage);
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
-		meta = (ReturnDisplayName = "Started"))
+UFUNCTION(BlueprintCallable, Category = "武器|表现",
+		meta = (ReturnDisplayName = "已开始"))
 	bool StartFullHolsterPresentation(
 		AWeaponRuntime* FormalWeapon,
 		USkeletalMeshComponent* CharacterMesh,
 		USkeletalMeshComponent* WeaponMesh,
 		const FWeaponPresentationProfile& Profile);
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+UFUNCTION(BlueprintCallable, Category = "武器|表现")
 	void CancelFullHolsterPresentation();
-UFUNCTION(BlueprintPure, Category = "Weapon Presentation")
+UFUNCTION(BlueprintPure, Category = "武器|表现")
 	bool IsFullHolsterPresentationActive() const;
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation")
+UFUNCTION(BlueprintCallable, Category = "武器|表现")
 	void CancelReloadWeaponPresentation(bool bStopMontage = true);
 UFUNCTION(BlueprintCallable, BlueprintPure = false,
-		Category = "Weapon Presentation",
-		meta = (ReturnDisplayName = "Activated"))
+		Category = "武器|表现",
+		meta = (ReturnDisplayName = "已启用"))
 	bool TryActivateVisualWeapon(
 		AWeaponRuntime* FormalWeapon,
 		UChildActorComponent* VisualWeaponComponent,
 		AActor*& OutVisualWeapon,
 		FWeaponPresentationProfile& OutProfile);
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+UPROPERTY(BlueprintAssignable, Category = "武器|表现")
 	FWeaponPresentationSignal OnFullHolsterPresentationReady;
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+UPROPERTY(BlueprintAssignable, Category = "武器|表现")
 	FWeaponPresentationSignal OnFullHolsterPresentationCancelled;
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+UPROPERTY(BlueprintAssignable, Category = "武器|表现")
 	FDrawPresentationFinishedEvent OnDrawPresentationFinished;
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+UPROPERTY(BlueprintAssignable, Category = "武器|表现")
 	FWeaponPresentationSignal OnFastDrawTransitionRequested;
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+UPROPERTY(BlueprintAssignable, Category = "武器|表现")
 	FWeaponPresentationSignal OnFirePresentationRequested;
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+UPROPERTY(BlueprintAssignable, Category = "武器|表现")
 	FWeaponPresentationSignal OnReloadPresentationRequested;
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+UPROPERTY(BlueprintAssignable, Category = "武器|表现")
 	FWeaponPresentationSignal OnRecoilPresentationRequested;
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+UPROPERTY(BlueprintAssignable, Category = "武器|表现")
 	FWeaponPresentationSignal OnFireEffectsPresentationRequested;
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
-		meta = (ReturnDisplayName = "Started"))
+UFUNCTION(BlueprintCallable, Category = "武器|表现",
+		meta = (ReturnDisplayName = "已开始"))
 	bool StartSynchronizedReloadPresentation(
 		AWeaponRuntime* FormalWeapon,
 		USkeletalMeshComponent* CharacterMesh,
@@ -198,36 +198,36 @@ UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
 		USkeletalMeshComponent* WeaponMesh,
 		UAnimMontage* WeaponMontage,
 		float PlayRate = 1.0f);
-UFUNCTION(BlueprintCallable, Category = "Weapon Presentation",
-		meta = (ReturnDisplayName = "Started"))
+UFUNCTION(BlueprintCallable, Category = "武器|表现",
+		meta = (ReturnDisplayName = "已开始"))
 	bool StartReloadWeaponPresentation(
 		AWeaponRuntime* FormalWeapon,
 		USkeletalMeshComponent* WeaponMesh,
 		UAnimMontage* Montage);
 UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "Weapon Presentation|Configuration",
+		Category = "武器|表现|配置",
 		meta = (DisplayName = "完整收枪完成通知名"))
 	FName FullHolsterFinishedNotifyName = TEXT("FullHolsterFinished");
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+UPROPERTY(BlueprintAssignable, Category = "武器|表现")
 	FReloadWeaponPresentationEvent OnReloadRoundPresentationCommitted;
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+UPROPERTY(BlueprintAssignable, Category = "武器|表现")
 	FReloadWeaponPresentationEvent OnReloadWeaponPresentationCompleted;
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+UPROPERTY(BlueprintAssignable, Category = "武器|表现")
 	FPresentationSwitchCommitEvent OnPresentationSwitchCommitRequested;
-UPROPERTY(BlueprintAssignable, Category = "Weapon Presentation")
+UPROPERTY(BlueprintAssignable, Category = "武器|表现")
 	FPresentationSwitchCommitEvent OnPresentationSwitchCommitCancelled;
 protected:
 UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "Weapon Presentation|Configuration",
+		Category = "武器|表现|配置",
 		meta = (DisplayName = "视觉武器基类"))
 	TSubclassOf<AActor> VisualWeaponBaseClass;
 UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "Weapon Presentation|Configuration")
+		Category = "武器|表现|配置", meta=(DisplayName="武器表现配置"))
 	TArray<FWeaponPresentationProfile> WeaponPresentationProfiles;
 	virtual void EndPlay(
 		const EEndPlayReason::Type EndPlayReason) override;
 UPROPERTY(EditAnywhere, BlueprintReadWrite,
-		Category = "Weapon Presentation|Configuration",
+		Category = "武器|表现|配置",
 		meta = (ClampMin = "0.0", DisplayName = "拔枪切换提前放行秒数"))
 	float DrawSwitchReleaseLeadTime = 0.3f;
 private:

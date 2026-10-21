@@ -9,42 +9,42 @@
 class UWeaponRecoilData;
 class UCameraComponent;
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent, DisplayName="镜头后坐恢复组件"))
 class DUST2_API UCameraRecoilRecoveryComponent : public UActorComponent
 {
     GENERATED_BODY()
 public:
     UCameraRecoilRecoveryComponent();
     // Compatibility entry: immediate kick, original cumulative limits.
-    UFUNCTION(BlueprintCallable, Category="Recoil")
+    UFUNCTION(BlueprintCallable, Category="武器|后坐力")
     void ApplyRecoilKick(float PitchKick, float YawKick);
-    UFUNCTION(BlueprintCallable, Category="Recoil")
+    UFUNCTION(BlueprintCallable, Category="武器|后坐力")
     void ApplyRecoilKickWithData(float PitchKick, float YawKick, UWeaponRecoilData* RecoilSettings);
-    UFUNCTION(BlueprintCallable, Category="Recoil")
+    UFUNCTION(BlueprintCallable, Category="武器|后坐力")
     void ApplyRecoilWithCamera(float PitchKick, float YawKick,
         UWeaponRecoilData* RecoilSettings, UCameraComponent* RecoilCamera);
-    UFUNCTION(BlueprintCallable, Category="Recoil")
+    UFUNCTION(BlueprintCallable, Category="武器|后坐力")
     void StartRecovery();
     // Manual look discards recovery bookkeeping, but retains accepted shot tails.
-    UFUNCTION(BlueprintCallable, Category="Recoil")
+    UFUNCTION(BlueprintCallable, Category="武器|后坐力")
     void NotifyManualLook();
     // Terminal cleanup: cancels both recovery and outstanding shot tails.
-    UFUNCTION(BlueprintCallable, Category="Recoil")
+    UFUNCTION(BlueprintCallable, Category="武器|后坐力")
     void ClearRecoil();
     virtual void TickComponent(float DeltaTime, ELevelTick TickType,
         FActorComponentTickFunction* ThisTickFunction) override;
 protected:
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Recoil")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="武器|后坐力", meta=(DisplayName="最大俯仰偏移"))
     float MaxPitchOffset;
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Recoil")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="武器|后坐力", meta=(DisplayName="最大偏航偏移"))
     float MaxYawOffset;
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Recoil")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="武器|后坐力", meta=(DisplayName="恢复延迟"))
     float RecoveryDelay;
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Recoil")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="武器|后坐力", meta=(DisplayName="恢复速度"))
     float RecoverySpeed;
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Recoil")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="武器|后坐力", meta=(DisplayName="俯仰恢复比例"))
     float RecoveryPitchRatio;
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Recoil")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="武器|后坐力", meta=(DisplayName="恢复间隔"))
     float RecoveryInterval;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 private:

@@ -8,6 +8,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
 #include "WeaponRuntime.h"
+#include "WeaponPresentationData.h"
 
 UWeaponPresentationComponent::UWeaponPresentationComponent()
 {
@@ -96,22 +97,12 @@ bool UWeaponPresentationComponent::FindWeaponPresentationProfile(
 		return false;
 	}
 
-	for (const FWeaponPresentationProfile& Profile
-		: WeaponPresentationProfiles)
-	{
-		if (!Profile.FormalWeaponClass)
-		{
-			continue;
-		}
-
-		if (FormalWeapon->IsA(Profile.FormalWeaponClass.Get()))
-		{
-			OutProfile = Profile;
-			return true;
-		}
-	}
-
-	return false;
+	const bool bFound = UWeaponPresentationData::ResolvePlayerProfileWithLegacy(
+		FormalWeapon->WeaponDefinition.Get(), FormalWeapon->GetClass(), WeaponPresentationProfiles, OutProfile);
+	// Keep legacy Blueprint branches that inspect the returned array length consistent with the switch.
+	// Only the output copy is cleared; toggling off never deletes the asset's configured variants.
+	if (bFound && !OutProfile.bUseCountBasedReload) OutProfile.ReloadVariants.Reset();
+	return bFound;
 }
 AActor* UWeaponPresentationComponent::TryInitializeVisualWeapon(
 	AWeaponRuntime* FormalWeapon,
@@ -175,7 +166,7 @@ UAnimMontage* UWeaponPresentationComponent::ResolveWeaponFireMontage(
 		return Profile.EmptyFireWeaponMontage.Get();
 	}
 
-	return DefaultFireMontage;
+	return IsValid(Profile.WeaponFireMontage.Get()) ? Profile.WeaponFireMontage.Get() : DefaultFireMontage;
 }
 void UWeaponPresentationComponent::PlayPresentationMontage(
 	USkeletalMeshComponent* Mesh,
@@ -248,6 +239,9 @@ void UWeaponPresentationComponent::PlayFirePresentation(
 		ResolveWeaponFireMontage(
 			FormalWeapon,
 			DefaultWeaponFireMontage);
+	FWeaponPresentationProfile Profile;
+	if (FindWeaponPresentationProfile(FormalWeapon, Profile) && IsValid(Profile.CharacterFireMontage.Get()))
+		CharacterFireMontage = Profile.CharacterFireMontage.Get();
 
 	OnRecoilPresentationRequested.Broadcast();
 
@@ -275,7 +269,7 @@ bool UWeaponPresentationComponent::ResolveStandardReloadPresentation(
 		return false;
 	}
 
-	if (Profile.ReloadVariants.Num() > 0)
+	if (Profile.bUseCountBasedReload)
 	{
 		return false;
 	}
@@ -283,8 +277,8 @@ bool UWeaponPresentationComponent::ResolveStandardReloadPresentation(
 	const bool bIsEmpty = FormalWeapon->GetCurrentAmmo() == 0;
 
 	OutPresentation.CharacterMontage = bIsEmpty
-		? CharacterReloadEmpty
-		: CharacterReloadTactical;
+		? (IsValid(Profile.CharacterReloadEmptyMontage.Get()) ? Profile.CharacterReloadEmptyMontage.Get() : CharacterReloadEmpty)
+		: (IsValid(Profile.CharacterReloadTacticalMontage.Get()) ? Profile.CharacterReloadTacticalMontage.Get() : CharacterReloadTactical);
 
 	OutPresentation.WeaponMontage = bIsEmpty
 		? Profile.ReloadEmptyMontage
@@ -312,6 +306,7 @@ bool UWeaponPresentationComponent::ResolveVariantReloadPresentation(
 	{
 		return false;
 	}
+	if (!Profile.bUseCountBasedReload) return false;
 
 	const int32 MissingAmmo = FMath::Max(
 		0, MagazineCapacity - FormalWeapon->GetCurrentAmmo());

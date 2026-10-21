@@ -355,6 +355,364 @@ AWeaponRuntime* Runtime = Component->GetWeaponRuntime();
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FEnemyWeaponRandomVolleySampleTest,
+	"Dust2.EnemyWeapon.FullAutoRandomVolleySampleAndPause",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FEnemyWeaponRandomVolleySampleTest::RunTest(const FString& Parameters)
+{
+	FScopedEnemyWeaponTestWorld Fixture;
+	if (!TestNotNull(TEXT("isolated test world exists"), Fixture.Get())) return false;
+
+	UWeaponDefinitionData* Definition = Fixture.MakeDefinition(30);
+	Definition->FireInterval = 0.01f;
+	UDustEnemyCombatProfile* Profile = Fixture.MakeProfile();
+	Profile->BurstShotCount = 3;
+	Profile->MaxBurstShotCount = 6;
+	Profile->BurstPauseSeconds = 0.6f;
+
+	APawn* Enemy = Fixture.SpawnPawn();
+	AActor* Target = Fixture.SpawnActorWithRoot(FTransform(FVector(600.0f, 0.0f, 0.0f)));
+	if (!TestNotNull(TEXT("enemy spawned"), Enemy) || !TestNotNull(TEXT("target spawned"), Target)) return false;
+	UDustEnemyWeaponComponent* Component = Fixture.AddWeaponComponent(Enemy, Definition, Profile);
+	if (!TestNotNull(TEXT("weapon component exists"), Component)) return false;
+	if (!TestNotNull(TEXT("muzzle source attached"), Fixture.AddMuzzle(Enemy, Component))) return false;
+	if (!TestTrue(TEXT("valid muzzle and target start engagement"), Component->StartEngagement(Target))) return false;
+
+	Fixture.Advance(0.05f);
+	if (!TestEqual(TEXT("first committed shot records one success"), Component->SuccessfulShots, 1)) return false;
+	const int32 SampledTarget = Component->CurrentVolleyShotTarget;
+	TestTrue(TEXT("full-auto samples its target once within the 3-6 range"),
+		SampledTarget >= 3 && SampledTarget <= 6);
+
+	// A disjoint range makes a mid-volley resample observable for every initial 3-6 result.
+	Profile->BurstShotCount = 9;
+	Profile->MaxBurstShotCount = 9;
+
+	for (int32 ShotIndex = 1; ShotIndex < SampledTarget; ++ShotIndex)
+	{
+		Fixture.Advance(0.05f);
+		TestEqual(TEXT("every successful shot advances the current volley"),
+			Component->SuccessfulShots, ShotIndex + 1);
+		TestEqual(TEXT("the sampled target stays fixed until the final shot"),
+			Component->CurrentVolleyShotTarget, ShotIndex + 1 < SampledTarget ? SampledTarget : 0);
+	}
+	if (!TestEqual(TEXT("the volley ends exactly at its sampled target"),
+		Component->SuccessfulShots, SampledTarget)) return false;
+
+	Fixture.Advance(0.5f);
+	TestEqual(TEXT("no shot is fired during the volley pause"), Component->SuccessfulShots, SampledTarget);
+	Fixture.Advance(0.11f);
+	TestEqual(TEXT("fire resumes after the volley pause"), Component->SuccessfulShots, SampledTarget + 1);
+	const int32 NextTarget = Component->CurrentVolleyShotTarget;
+	TestEqual(TEXT("only the next volley uses the edited fixed range"), NextTarget, 9);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FEnemyWeaponVolleyBoundsTest,
+	"Dust2.EnemyWeapon.FullAutoVolleyBoundsNormalization",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FEnemyWeaponVolleyBoundsTest::RunTest(const FString& Parameters)
+{
+	FScopedEnemyWeaponTestWorld Fixture;
+	if (!TestNotNull(TEXT("isolated test world exists"), Fixture.Get())) return false;
+
+	UWeaponDefinitionData* Definition = Fixture.MakeDefinition(30);
+	Definition->FireInterval = 0.01f;
+	UDustEnemyCombatProfile* Profile = Fixture.MakeProfile();
+
+	APawn* Enemy = Fixture.SpawnPawn();
+	AActor* Target = Fixture.SpawnActorWithRoot(FTransform(FVector(600.0f, 0.0f, 0.0f)));
+	if (!TestNotNull(TEXT("enemy spawned"), Enemy) || !TestNotNull(TEXT("target spawned"), Target)) return false;
+	UDustEnemyWeaponComponent* Component = Fixture.AddWeaponComponent(Enemy, Definition, Profile);
+	if (!TestNotNull(TEXT("weapon component exists"), Component)) return false;
+	if (!TestNotNull(TEXT("muzzle source attached"), Fixture.AddMuzzle(Enemy, Component))) return false;
+
+	const auto SampleVolleyTarget = [&](int32 MinShots, int32 MaxShots) -> int32
+	{
+		Component->StopEngagement();
+		Profile->BurstShotCount = MinShots;
+		Profile->MaxBurstShotCount = MaxShots;
+		if (!Component->StartEngagement(Target)) return -1;
+		Fixture.Advance(0.05f);
+		const int32 Sampled = Component->CurrentVolleyShotTarget;
+		Component->StopEngagement();
+		return Sampled;
+	};
+
+	TestEqual(TEXT("equal min and max produces a fixed target"), SampleVolleyTarget(4, 4), 4);
+	const int32 Reversed = SampleVolleyTarget(6, 3);
+	TestTrue(TEXT("reversed bounds normalize to the 3-6 range"), Reversed >= 3 && Reversed <= 6);
+
+	// A one-shot volley clears its target immediately, so cover its real completion and
+	// pause before checking the normalized value directly through the helper.
+	Profile->BurstShotCount = 0;
+	Profile->MaxBurstShotCount = 0;
+	const int32 ShotsBeforeZero = Component->SuccessfulShots;
+	if (!TestTrue(TEXT("zero-bound profile still starts engagement"),
+		Component->StartEngagement(Target))) return false;
+	Fixture.Advance(0.05f);
+	TestEqual(TEXT("zero bounds produce exactly one real shot"),
+		Component->SuccessfulShots, ShotsBeforeZero + 1);
+	TestEqual(TEXT("the normalized one-shot volley completes and clears its target"),
+		Component->CurrentVolleyShotTarget, 0);
+	Fixture.Advance(0.5f);
+	TestEqual(TEXT("the normalized one-shot volley still pauses"),
+		Component->SuccessfulShots, ShotsBeforeZero + 1);
+	Component->StopEngagement();
+
+	TestEqual(TEXT("zero bounds normalize to one shot"),
+		Component->ResolveVolleyShotTarget(EFireMode::FullAutomatic), 1);
+	Profile->BurstShotCount = -5;
+	Profile->MaxBurstShotCount = 0;
+	TestEqual(TEXT("negative/zero bounds normalize to one shot"),
+		Component->ResolveVolleyShotTarget(EFireMode::FullAutomatic), 1);
+	Profile->BurstShotCount = 0;
+	Profile->MaxBurstShotCount = 4;
+	const int32 Mixed = Component->ResolveVolleyShotTarget(EFireMode::FullAutomatic);
+	TestTrue(TEXT("a clamped lower bound never exceeds the upper bound"), Mixed >= 1 && Mixed <= 4);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FEnemyWeaponVolleyStopRestartTest,
+	"Dust2.EnemyWeapon.VolleyStopRestartAndRepeatedStart",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FEnemyWeaponVolleyStopRestartTest::RunTest(const FString& Parameters)
+{
+	FScopedEnemyWeaponTestWorld Fixture;
+	if (!TestNotNull(TEXT("isolated test world exists"), Fixture.Get())) return false;
+
+	UWeaponDefinitionData* Definition = Fixture.MakeDefinition(30);
+	Definition->FireInterval = 0.01f;
+	UDustEnemyCombatProfile* Profile = Fixture.MakeProfile();
+	Profile->BurstShotCount = 2;
+	Profile->MaxBurstShotCount = 2;
+	Profile->BurstPauseSeconds = 0.6f;
+
+	APawn* Enemy = Fixture.SpawnPawn();
+	AActor* Target = Fixture.SpawnActorWithRoot(FTransform(FVector(600.0f, 0.0f, 0.0f)));
+	if (!TestNotNull(TEXT("enemy spawned"), Enemy) || !TestNotNull(TEXT("target spawned"), Target)) return false;
+	UDustEnemyWeaponComponent* Component = Fixture.AddWeaponComponent(Enemy, Definition, Profile);
+	if (!TestNotNull(TEXT("weapon component exists"), Component)) return false;
+	if (!TestNotNull(TEXT("muzzle source attached"), Fixture.AddMuzzle(Enemy, Component))) return false;
+	if (!TestTrue(TEXT("valid muzzle and target start engagement"), Component->StartEngagement(Target))) return false;
+
+	Fixture.Advance(0.05f);
+	TestEqual(TEXT("first shot starts the current volley"), Component->SuccessfulShots, 1);
+	TestEqual(TEXT("the fixed target is captured once"), Component->CurrentVolleyShotTarget, 2);
+
+	for (int32 Repeat = 0; Repeat < 3; ++Repeat)
+		TestTrue(TEXT("repeated StartEngagement for the same target stays accepted"),
+			Component->StartEngagement(Target));
+	TestEqual(TEXT("repeated StartEngagement does not reset the current volley target"),
+		Component->CurrentVolleyShotTarget, 2);
+
+	Fixture.Advance(0.05f);
+	TestEqual(TEXT("the current volley continues after repeated StartEngagement"),
+		Component->SuccessfulShots, 2);
+	TestEqual(TEXT("the current volley ends at its fixed target instead of restarting"),
+		Component->CurrentVolleyShotTarget, 0);
+
+	Fixture.Advance(0.5f);
+	TestEqual(TEXT("the completed volley still pauses"), Component->SuccessfulShots, 2);
+
+	Component->StopEngagement();
+	TestFalse(TEXT("explicit stop clears engagement"), Component->IsEngaging());
+	TestEqual(TEXT("explicit stop clears the current volley target"), Component->CurrentVolleyShotTarget, 0);
+
+	if (!TestTrue(TEXT("restart after a completed volley accepts the same target"),
+		Component->StartEngagement(Target))) return false;
+	Fixture.Advance(0.05f);
+	TestEqual(TEXT("restart counts a fresh volley shot"), Component->SuccessfulShots, 3);
+	TestEqual(TEXT("restart starts a fresh volley"), Component->CurrentVolleyShotTarget, 2);
+
+	// Stop in the middle of this volley; the remaining shot must not survive.
+	Component->StopEngagement();
+	TestEqual(TEXT("stopping an unfinished volley clears its target"),
+		Component->CurrentVolleyShotTarget, 0);
+	if (!TestTrue(TEXT("restart after an unfinished volley accepts the same target"),
+		Component->StartEngagement(Target))) return false;
+	Fixture.Advance(0.05f);
+	TestEqual(TEXT("restart after an unfinished volley counts a new first shot"),
+		Component->SuccessfulShots, 4);
+	TestEqual(TEXT("restart after an unfinished volley samples a new target"),
+		Component->CurrentVolleyShotTarget, 2);
+	Fixture.Advance(0.05f);
+	TestEqual(TEXT("the restarted volley completes at its own target"),
+		Component->CurrentVolleyShotTarget, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FEnemyWeaponVolleyCooldownTest,
+	"Dust2.EnemyWeapon.VolleyCooldownDoesNotCountOrResample",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FEnemyWeaponVolleyCooldownTest::RunTest(const FString& Parameters)
+{
+	FScopedEnemyWeaponTestWorld Fixture;
+	if (!TestNotNull(TEXT("isolated test world exists"), Fixture.Get())) return false;
+
+	UWeaponDefinitionData* Definition = Fixture.MakeDefinition(30);
+	Definition->FireInterval = 0.06f;
+	UDustEnemyCombatProfile* Profile = Fixture.MakeProfile();
+	Profile->BurstShotCount = 1;
+	Profile->MaxBurstShotCount = 1;
+	Profile->BurstPauseSeconds = 0.6f;
+
+	APawn* Enemy = Fixture.SpawnPawn();
+	AActor* Target = Fixture.SpawnActorWithRoot(FTransform(FVector(600.0f, 0.0f, 0.0f)));
+	if (!TestNotNull(TEXT("enemy spawned"), Enemy) || !TestNotNull(TEXT("target spawned"), Target)) return false;
+	UDustEnemyWeaponComponent* Component = Fixture.AddWeaponComponent(Enemy, Definition, Profile);
+	if (!TestNotNull(TEXT("weapon component exists"), Component)) return false;
+	if (!TestNotNull(TEXT("muzzle source attached"), Fixture.AddMuzzle(Enemy, Component))) return false;
+	if (!TestTrue(TEXT("valid muzzle and target start engagement"), Component->StartEngagement(Target))) return false;
+
+	Fixture.Advance(0.05f);
+	if (!TestEqual(TEXT("the first shot completes the single-shot volley"),
+		Component->SuccessfulShots, 1)) return false;
+	TestEqual(TEXT("a completed volley clears its target"), Component->CurrentVolleyShotTarget, 0);
+
+	// Let the component's post-volley retry window approach, then simulate another caller
+	// committing a shot so the runtime is still cooling when the AI retries.
+	Fixture.Advance(0.55f);
+	Fixture.Advance(0.01f);
+	AWeaponRuntime* Runtime = Component->GetWeaponRuntime();
+	if (!TestNotNull(TEXT("enemy has a private runtime"), Runtime)) return false;
+	TestTrue(TEXT("external commit succeeds before the component retry"),
+		Runtime->TryCommitFireWithResult() == EWeaponFireAttemptResult::Committed);
+
+	Fixture.Advance(0.05f);
+	TestEqual(TEXT("a cooldown attempt is not counted as a successful shot"),
+		Component->SuccessfulShots, 1);
+	TestEqual(TEXT("a cooldown attempt does not sample a new volley target"),
+		Component->CurrentVolleyShotTarget, 0);
+
+	Fixture.Advance(0.05f);
+	TestEqual(TEXT("the component retries after the runtime cooldown"),
+		Component->SuccessfulShots, 2);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FEnemyWeaponNativeVolleyModesTest,
+	"Dust2.EnemyWeapon.NativeVolleyModesAndLiveModeChange",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FEnemyWeaponNativeVolleyModesTest::RunTest(const FString& Parameters)
+{
+	FScopedEnemyWeaponTestWorld Fixture;
+	if (!TestNotNull(TEXT("isolated test world exists"), Fixture.Get())) return false;
+
+	UWeaponDefinitionData* Definition = Fixture.MakeDefinition(30);
+	Definition->AllowedFireModes = {
+		EFireMode::FullAutomatic, EFireMode::Burst, EFireMode::SemiAutomatic};
+	Definition->FireInterval = 0.2f;
+	Definition->BurstShotInterval = 0.0f; // Burst uses FireInterval here, not an override.
+	Definition->BurstRecoveryInterval = 0.8f;
+	UDustEnemyCombatProfile* Profile = Fixture.MakeProfile();
+	Profile->BurstShotCount = 6;
+	Profile->MaxBurstShotCount = 6;
+	Profile->BurstPauseSeconds = 0.1f;
+
+	APawn* Enemy = Fixture.SpawnPawn();
+	AActor* Target = Fixture.SpawnActorWithRoot(FTransform(FVector(600.0f, 0.0f, 0.0f)));
+	if (!TestNotNull(TEXT("enemy spawned"), Enemy) || !TestNotNull(TEXT("target spawned"), Target)) return false;
+	UDustEnemyWeaponComponent* Component = Fixture.AddWeaponComponent(Enemy, Definition, Profile);
+	if (!TestNotNull(TEXT("weapon component exists"), Component)) return false;
+	if (!TestNotNull(TEXT("muzzle source attached"), Fixture.AddMuzzle(Enemy, Component))) return false;
+	if (!TestTrue(TEXT("valid muzzle and target start engagement"), Component->StartEngagement(Target))) return false;
+
+	Fixture.Advance(0.05f);
+	TestEqual(TEXT("full-auto fires its first shot"), Component->SuccessfulShots, 1);
+	TestEqual(TEXT("full-auto target is six"), Component->CurrentVolleyShotTarget, 6);
+
+	AWeaponRuntime* Runtime = Component->GetWeaponRuntime();
+	if (!TestNotNull(TEXT("enemy has a private runtime"), Runtime)) return false;
+	Runtime->RestoreFireMode(EFireMode::Burst);
+
+	Fixture.Advance(0.25f);
+	TestEqual(TEXT("burst starts a native three-shot volley"), Component->SuccessfulShots, 2);
+	TestEqual(TEXT("the old full-auto count is not carried into burst"),
+		Component->CurrentVolleyShotTarget, 3);
+
+	Fixture.Advance(0.25f);
+	TestEqual(TEXT("burst fires its second shot"), Component->SuccessfulShots, 3);
+	TestEqual(TEXT("burst volley still has one shot left"), Component->CurrentVolleyShotTarget, 3);
+
+	Fixture.Advance(0.25f);
+	TestEqual(TEXT("burst completes at three shots"), Component->SuccessfulShots, 4);
+	TestEqual(TEXT("burst volley clears its target after the third shot"),
+		Component->CurrentVolleyShotTarget, 0);
+
+	Fixture.Advance(0.6f);
+	TestEqual(TEXT("burst recovery interval still blocks the next volley"),
+		Component->SuccessfulShots, 4);
+
+	Fixture.Advance(0.15f);
+	TestEqual(TEXT("burst resumes after the recovery interval"), Component->SuccessfulShots, 5);
+	TestEqual(TEXT("the next burst volley samples three again"), Component->CurrentVolleyShotTarget, 3);
+
+	Runtime->RestoreFireMode(EFireMode::SemiAutomatic);
+	Fixture.Advance(0.15f);
+	TestEqual(TEXT("semi-automatic stays one shot per volley"), Component->SuccessfulShots, 6);
+	TestEqual(TEXT("semi-automatic clears its single-shot target"),
+		Component->CurrentVolleyShotTarget, 0);
+
+	Fixture.Advance(0.1f);
+	TestEqual(TEXT("semi-automatic still waits for its interval"), Component->SuccessfulShots, 6);
+
+	Fixture.Advance(0.15f);
+	TestEqual(TEXT("semi-automatic fires again after its interval"), Component->SuccessfulShots, 7);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FEnemyWeaponEmptyVolleyTest,
+	"Dust2.EnemyWeapon.EmptyMagazineCannotCompleteVolley",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FEnemyWeaponEmptyVolleyTest::RunTest(const FString& Parameters)
+{
+	FScopedEnemyWeaponTestWorld Fixture;
+	if (!TestNotNull(TEXT("isolated test world exists"), Fixture.Get())) return false;
+
+	UWeaponDefinitionData* Definition = Fixture.MakeDefinition(1);
+	Definition->FireInterval = 0.01f;
+	UDustEnemyCombatProfile* Profile = Fixture.MakeProfile();
+	Profile->BurstShotCount = 3;
+	Profile->MaxBurstShotCount = 6;
+	Profile->BurstPauseSeconds = 0.6f;
+
+	APawn* Enemy = Fixture.SpawnPawn();
+	AActor* Target = Fixture.SpawnActorWithRoot(FTransform(FVector(600.0f, 0.0f, 0.0f)));
+	if (!TestNotNull(TEXT("enemy spawned"), Enemy) || !TestNotNull(TEXT("target spawned"), Target)) return false;
+	UDustEnemyWeaponComponent* Component = Fixture.AddWeaponComponent(Enemy, Definition, Profile);
+	if (!TestNotNull(TEXT("weapon component exists"), Component)) return false;
+	if (!TestNotNull(TEXT("muzzle source attached"), Fixture.AddMuzzle(Enemy, Component))) return false;
+	if (!TestTrue(TEXT("valid muzzle and target start engagement"), Component->StartEngagement(Target))) return false;
+
+	Fixture.Advance(0.05f);
+	TestEqual(TEXT("one round produces one real shot"), Component->SuccessfulShots, 1);
+	TestTrue(TEXT("the incomplete volley still has a sampled target"),
+		Component->CurrentVolleyShotTarget >= 3 && Component->CurrentVolleyShotTarget <= 6);
+	AWeaponRuntime* Runtime = Component->GetWeaponRuntime();
+	if (!TestNotNull(TEXT("enemy has a private runtime"), Runtime)) return false;
+	TestEqual(TEXT("the only magazine round was consumed"), Runtime->GetCurrentAmmo(), 0);
+
+	Fixture.Advance(0.05f);
+	TestFalse(TEXT("empty magazine stops engagement before another shot"), Component->IsEngaging());
+	TestEqual(TEXT("empty magazine cannot fabricate successful shots"), Component->SuccessfulShots, 1);
+	TestEqual(TEXT("empty magazine clears the pending volley target"),
+		Component->CurrentVolleyShotTarget, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FEnemyWeaponWallOcclusionTest,
 	"Dust2.EnemyWeapon.VisibilityBlockPreventsShot",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

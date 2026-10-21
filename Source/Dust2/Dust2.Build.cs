@@ -7,7 +7,7 @@ public class Dust2 : ModuleRules
 	public Dust2(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-        if (Target.bBuildEditor) PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "AssetRegistry", "NiagaraEditor", "BlueprintGraph", "RHI" });
+        if (Target.bBuildEditor) PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "AssetRegistry", "NiagaraEditor", "BlueprintGraph", "RHI", "PropertyEditor" });
 	
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "Niagara", "UMG", "SlateCore", "AIModule", "GameplayTasks", "NavigationSystem", "StateTreeModule", "GameplayStateTreeModule" });
 

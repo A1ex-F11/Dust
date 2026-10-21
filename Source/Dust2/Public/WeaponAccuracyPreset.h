@@ -3,7 +3,7 @@
 #include "Engine/DataAsset.h"
 #include "WeaponAccuracyPreset.generated.h"
 
-UENUM(BlueprintType)
+UENUM(BlueprintType, meta=(DisplayName="换弹方式"))
 enum class EWeaponReloadStyle : uint8
 {
 	Magazine UMETA(DisplayName="整弹匣装填"),
@@ -11,7 +11,7 @@ enum class EWeaponReloadStyle : uint8
 	PerRoundOrEmptyBatch UMETA(DisplayName="逐颗，全空且备弹充足时整批")
 };
 
-USTRUCT(BlueprintType)
+USTRUCT(BlueprintType, meta=(DisplayName="姿态精度参数"))
 struct DUST2_API FWeaponPostureSettings
 {
 	GENERATED_BODY()
@@ -30,6 +30,6 @@ class DUST2_API UWeaponAccuracyPreset : public UDataAsset
 {
 	GENERATED_BODY()
 public:
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="姿态精度", meta=(ShowOnlyInnerProperties))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="武器|精度", meta=(ShowOnlyInnerProperties, DisplayName="姿态精度设置"))
 	FWeaponPostureSettings Settings;
 };

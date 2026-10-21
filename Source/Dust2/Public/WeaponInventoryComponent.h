@@ -20,7 +20,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnEquippedWeaponChanged,
 	AWeaponRuntime*, NewWeapon);
 
-UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent, DisplayName="武器背包组件"))
 class DUST2_API UWeaponInventoryComponent : public UActorComponent
 {
 	GENERATED_BODY()
@@ -28,7 +28,7 @@ class DUST2_API UWeaponInventoryComponent : public UActorComponent
 public:
 	UWeaponInventoryComponent();
 
-	UFUNCTION(BlueprintCallable, Category = "Weapon|Inventory")
+	UFUNCTION(BlueprintCallable, Category = "武器|背包")
 	bool InitializeNativeInventory(
 		UChildActorComponent* Slot1,
 		UChildActorComponent* Slot2,
@@ -36,12 +36,12 @@ public:
 
 	// Call before rebuilding checkpoint slot actors. The next successful
 	// initialization refreshes presentation once for a valid restored weapon.
-	UFUNCTION(BlueprintCallable, Category = "Weapon|Inventory")
+	UFUNCTION(BlueprintCallable, Category = "武器|背包")
 	bool PrepareForExternalRestore();
 
 	// Rebuild both slots before the Blueprint binds delegates and calls
 	// InitializeNativeInventory once. Empty classes remain empty slots.
-	UFUNCTION(BlueprintCallable, Category = "Weapon|Inventory|Checkpoint")
+	UFUNCTION(BlueprintCallable, Category = "武器|背包|检查点")
 	bool RestoreCheckpointWeapons(
 		UChildActorComponent* Slot1,
 		UChildActorComponent* Slot2,
@@ -57,40 +57,40 @@ public:
 		bool bSlot2InitialDrawConsumed,
 		bool bSlot1Active);
 
-	UFUNCTION(BlueprintPure, Category = "Weapon|Inventory")
+	UFUNCTION(BlueprintPure, Category = "武器|背包")
 	AWeaponRuntime* GetCurrentWeaponNative() const;
 
-	UFUNCTION(BlueprintPure, Category = "Weapon|Inventory")
+	UFUNCTION(BlueprintPure, Category = "武器|背包")
 	AWeaponRuntime* GetSlotWeaponNative(int32 SlotIndex) const;
 
-	UFUNCTION(BlueprintPure, Category = "Weapon|Inventory")
+	UFUNCTION(BlueprintPure, Category = "武器|背包")
 	bool IsInventoryBusy() const;
 
 	// Query only while handling the synchronous OnEquippedWeaponChanged event.
-	UFUNCTION(BlueprintPure, Category = "Weapon|Inventory")
+	UFUNCTION(BlueprintPure, Category = "武器|背包")
 	bool ShouldRefreshEquippedPresentation() const;
 
-	UFUNCTION(BlueprintCallable, Category = "Weapon|Inventory")
+	UFUNCTION(BlueprintCallable, Category = "武器|背包")
 	bool TryPickupNative(AWeaponPickupActor* Source, bool bAllowReplaceCurrent);
 
-	UFUNCTION(BlueprintCallable, Category = "Weapon|Inventory")
+	UFUNCTION(BlueprintCallable, Category = "武器|背包")
 	bool TryEquipWeaponNative(AWeaponRuntime* NewWeapon);
 
-	UFUNCTION(BlueprintCallable, Category = "Weapon|Inventory")
+	UFUNCTION(BlueprintCallable, Category = "武器|背包")
 	bool TrySwitchWeaponNative();
 
-	UFUNCTION(BlueprintCallable, Category = "Weapon|Inventory")
+	UFUNCTION(BlueprintCallable, Category = "武器|背包")
 	bool TryDropCurrentNative();
 
-	UPROPERTY(BlueprintAssignable, Category = "Weapon|Inventory")
+	UPROPERTY(BlueprintAssignable, Category = "武器|背包")
 	FOnInventoryChanged OnInventoryChanged;
 
-	UPROPERTY(BlueprintAssignable, Category = "Weapon|Inventory")
+	UPROPERTY(BlueprintAssignable, Category = "武器|背包")
 	FOnBeforeWeaponChange OnBeforeWeaponChange;
 
-	UPROPERTY(BlueprintAssignable, Category = "Weapon|Inventory")
+	UPROPERTY(BlueprintAssignable, Category = "武器|背包")
 	FOnEquippedWeaponChanged OnEquippedWeaponChanged;
-	UFUNCTION(BlueprintCallable, Category = "Weapon|Inventory")
+	UFUNCTION(BlueprintCallable, Category = "武器|背包")
 	bool SyncLegacyWeaponReferences();
 
 protected:
@@ -133,20 +133,20 @@ private:
 	UPROPERTY(Transient)
 	TWeakObjectPtr<AWeaponRuntime> CurrentWeapon;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Weapon|Inventory|Drop")
+	UPROPERTY(EditDefaultsOnly, Category = "武器|背包|丢弃", meta=(DisplayName="武器拾取类映射"))
 	TMap<TSubclassOf<AWeaponRuntime>, TSubclassOf<AWeaponPickupActor>>
 	PickupClassByWeaponClass;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Weapon|Inventory|Drop",
-		meta = (ClampMin = "0.0"))
+	UPROPERTY(EditDefaultsOnly, Category = "武器|背包|丢弃",
+		meta = (ClampMin = "0.0", DisplayName="向前掉落距离"))
 	float DropForwardDistance = 200.0f;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Weapon|Inventory|Drop",
-		meta = (ClampMin = "0.0"))
+	UPROPERTY(EditDefaultsOnly, Category = "武器|背包|丢弃",
+		meta = (ClampMin = "0.0", DisplayName="向上偏移"))
 	float DropUpOffset = 50.0f;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Weapon|Inventory|Drop",
-		meta = (ClampMin = "0.0"))
+	UPROPERTY(EditDefaultsOnly, Category = "武器|背包|丢弃",
+		meta = (ClampMin = "0.0", DisplayName="自动拾取屏蔽时间"))
 	float AutoPickupBlockSeconds = 0.75f;
 
 	bool bInventoryBusy = false;

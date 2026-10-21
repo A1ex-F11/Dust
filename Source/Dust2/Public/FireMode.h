@@ -1,7 +1,7 @@
 #pragma once
 #include"CoreMinimal.h"
 #include"FireMode.generated.h"
-UENUM(BlueprintType)
+UENUM(BlueprintType, meta=(DisplayName="开火模式"))
 enum class EFireMode : uint8
 {
 	SemiAutomatic UMETA(DisplayName = "半自动"),

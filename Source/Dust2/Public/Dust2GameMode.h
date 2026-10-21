@@ -10,27 +10,27 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	EMissionState,
 	NewState
 );
-UCLASS()
+UCLASS(meta=(DisplayName="Dust2游戏模式"))
 class DUST2_API ADust2GameMode : public AGameModeBase
 {
 	GENERATED_BODY()
 public:
 	ADust2GameMode();
-	UPROPERTY(BlueprintAssignable,Category="Mission")
+	UPROPERTY(BlueprintAssignable,Category="任务")
 	FOnMissionChanged OnMissionChanged;
-	UFUNCTION(BlueprintPure,Category="Mission")
+	UFUNCTION(BlueprintPure,Category="任务")
 	EMissionState GetMissionState() const;
-	UFUNCTION(BlueprintCallable,Category="Mission")
+	UFUNCTION(BlueprintCallable,Category="任务")
 	bool TrySetMissionState(EMissionState NewState);
-	UFUNCTION(BlueprintCallable,Category="Mission")
+	UFUNCTION(BlueprintCallable,Category="任务")
 	void RestoreMissionState(EMissionState SavedState);
-	UFUNCTION(BlueprintCallable,Category="Mission")
+	UFUNCTION(BlueprintCallable,Category="任务")
 	bool TryResolveMissionResult(EMissionResult Result);
 protected:
-	UPROPERTY(Transient,VisibleInstanceOnly,BlueprintReadOnly,Category="Mission")
+	UPROPERTY(Transient,VisibleInstanceOnly,BlueprintReadOnly,Category="任务")
 	EMissionState MissionState;
-	UPROPERTY(Transient, VisibleInstanceOnly, BlueprintReadOnly, Category = "Mission")
+	UPROPERTY(Transient, VisibleInstanceOnly, BlueprintReadOnly, Category = "任务")
 	bool bResultResolved;
-	UPROPERTY(Transient, VisibleInstanceOnly, BlueprintReadOnly, Category = "Mission")
+	UPROPERTY(Transient, VisibleInstanceOnly, BlueprintReadOnly, Category = "任务")
 	EMissionResult MissionResult;
 };

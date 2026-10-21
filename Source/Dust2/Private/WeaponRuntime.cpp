@@ -2,10 +2,15 @@
 #include "WeaponRuntime.h"
 #include "ShotRecoilMath.h"
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
+#include "Perception/AISense_Hearing.h"
+#include "DustActorState.h"
 #include "WeaponDefinitionData.h"
+#include "WeaponAccuracyData.h"
 #include "WeaponBallisticsData.h"
 #include "FiringSpreadMath.h"
 #include "UObject/UnrealType.h"
+#include "Templates/UnrealTemplate.h"
 
 namespace
 {
@@ -39,6 +44,45 @@ namespace
 		return FMath::Clamp(
 			(FMath::IsFinite(SelectedSpreadAngle) ? FMath::Max(0.0f, SelectedSpreadAngle) : 0.0f) + FiringSpread, 0.0f, 89.0f);
 	}
+
+	/** Copy every recoil/gameplay field; the shared source asset is never modified. */
+	void CopyRecoilSettings(UWeaponRecoilData& Target, const UWeaponRecoilData& Source)
+	{
+		Target.AimingRecoilScale = Source.AimingRecoilScale;
+		Target.bUseFixedPattern = Source.bUseFixedPattern;
+		Target.bUseIndependentShotRecoil = Source.bUseIndependentShotRecoil;
+		Target.CameraFeedbackScale = Source.CameraFeedbackScale;
+		Target.CameraFeedbackPreset = Source.CameraFeedbackPreset;
+		Target.bOverrideCameraFeedback = Source.bOverrideCameraFeedback;
+		Target.CameraFeedbackOverrides = Source.CameraFeedbackOverrides;
+		Target.CameraReturnSpeed = Source.CameraReturnSpeed;
+		Target.ShotRecoilRecoverySpeed = Source.ShotRecoilRecoverySpeed;
+		Target.FixedPattern = Source.FixedPattern;
+		Target.PatternResetDelay = Source.PatternResetDelay;
+		Target.FixedPatternPitchScale = Source.FixedPatternPitchScale;
+		Target.FixedPatternYawScale = Source.FixedPatternYawScale;
+		Target.LoopStartIndex = Source.LoopStartIndex;
+		Target.SmoothKickDuration = Source.SmoothKickDuration;
+		Target.ImmediateKickFraction = Source.ImmediateKickFraction;
+		Target.RecoveryDelay = Source.RecoveryDelay;
+		Target.RecoverySpeed = Source.RecoverySpeed;
+		Target.RecoveryPitchRatio = Source.RecoveryPitchRatio;
+		Target.VerticalKickMin = Source.VerticalKickMin;
+		Target.VerticalKickMax = Source.VerticalKickMax;
+		Target.HorizontalKickMax = Source.HorizontalKickMax;
+	}
+
+	/** Overlay only the accuracy asset's camera fields, keeping recoil sequence/recovery intact. */
+	void CopyAccuracyCamera(UWeaponRecoilData& Target, const UWeaponAccuracyData& Source)
+	{
+		Target.CameraFeedbackScale = Source.CameraFeedbackScale;
+		Target.CameraFeedbackPreset = Source.CameraFeedbackPreset;
+		Target.bOverrideCameraFeedback = Source.bOverrideCameraFeedback;
+		Target.CameraFeedbackOverrides = Source.CameraFeedbackOverrides;
+		Target.CameraReturnSpeed = Source.CameraReturnSpeed;
+		Target.SmoothKickDuration = Source.SmoothKickDuration;
+		Target.ImmediateKickFraction = Source.ImmediateKickFraction;
+	}
 }
 AWeaponRuntime::AWeaponRuntime()
 
@@ -64,6 +108,7 @@ EFireMode AWeaponRuntime::GetFireMode() const
 }
 void AWeaponRuntime::RestoreFireMode(EFireMode SavedFireMode)
 {
+	bHasPendingNativeShot = false;
 	bRestoredFireMode = true;
 	CurrentFireMode = SavedFireMode;
 
@@ -75,6 +120,10 @@ int32 AWeaponRuntime::GetCurrentAmmo() const
 int32 AWeaponRuntime::GetReserveAmmo()const
 {
 	return ReserveAmmo;
+}
+int32 AWeaponRuntime::GetMagazineCapacity()const
+{
+	return MagazineCapacity;
 }
 bool AWeaponRuntime::TryConsumeAmmo()
 {
@@ -96,7 +145,10 @@ bool AWeaponRuntime::AddReserveAmmo(int32 Amount)
 }
 bool AWeaponRuntime::ReloadAmmo()
 {
-	if (bCurrentReloadUsesPerRound && bIsReloading)
+	// A batch/infinite request owns the whole transaction; an early direct refill would desync
+	// the captured animation amount, so it is rejected just like the old per-round path.
+	if ((bCurrentReloadUsesPerRound || bCurrentReloadUsesEmptyBatch || bCurrentReloadUsesInfiniteSource)
+		&& bIsReloading)
 	{
 		return false;
 	}
@@ -114,10 +166,12 @@ bool AWeaponRuntime::ReloadAmmo()
 }
 void AWeaponRuntime::RestoreAmmo(int32 NewCurrentAmmo, int32 NewReserveAmmo)
 {
+	bHasPendingNativeShot = false;
 	bRestoredAmmo = true;
 	ApplyDefinitionSettings();
 	ResetRecoilPattern();
-	if (bReloadOneRoundAtATime && bIsReloading)
+	if ((bReloadOneRoundAtATime || bCurrentReloadUsesEmptyBatch || bCurrentReloadUsesInfiniteSource)
+		&& bIsReloading)
 	{
 		CancelReload();
 	}
@@ -130,8 +184,50 @@ bool AWeaponRuntime::TryCommitFire()
 	return TryCommitFireWithResult() == EWeaponFireAttemptResult::Committed;
 }
 
+void AWeaponRuntime::ReportCommittedGunshotNoise()
+{
+	if (!IsValid(WeaponDefinition))
+	{
+		return;
+	}
+	const float RangeCm = WeaponDefinition->GetGunshotHearingRangeCm();
+	if (RangeCm <= 0.0f)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World || DustActorState::IsMissionOver(World))
+	{
+		return;
+	}
+
+	APawn* Source = Cast<APawn>(GetOwner());
+	if (!Source)
+	{
+		Source = Cast<APawn>(GetInstigator());
+	}
+	if (!Source)
+	{
+		Source = Cast<APawn>(GetParentActor());
+	}
+	if (!Source || !DustActorState::IsAlive(Source))
+	{
+		return;
+	}
+
+	UAISense_Hearing::ReportNoiseEvent(
+		World, Source->GetActorLocation(), 1.0f, Source, RangeCm, FName(TEXT("Gunshot")));
+}
+
 EWeaponFireAttemptResult AWeaponRuntime::TryCommitFireWithResult()
 {
+	// Presentation and damage delegates are synchronous. Reject nested fire before touching
+	// the outer shot's ammo, recoil/spread cache or one-shot resolution credential.
+	if (bCommittingFire || bResolvingNativeShot) return EWeaponFireAttemptResult::Busy;
+	TGuardValue<bool> CommitGuard(bCommittingFire, true);
+	// A rejected attempt cannot leave a previous shot available to the new BP wrapper.
+	bHasPendingNativeShot = false;
 	bHasCommittedSpreadProfile = false;
 	bCommittedIgnoreShotRecoil = false;
 	CommittedFiringSpread = 0.0f;
@@ -163,8 +259,31 @@ EWeaponFireAttemptResult AWeaponRuntime::TryCommitFireWithResult()
 	CacheCommittedFiringSpread(CurrentTime);
 	CacheCommittedRecoil(CurrentTime);
 	NextFireTime = CurrentTime + GetEffectiveFireInterval();
+	bHasPendingNativeShot = true;
+	ReportCommittedGunshotNoise();
 	OnFireCommitted.Broadcast();
 	return EWeaponFireAttemptResult::Committed;
+}
+FWeaponShotResolution AWeaponRuntime::ResolveCommittedShotNative(const FVector& TraceStart, const FVector& ShotDirection)
+{
+	if (!bHasPendingNativeShot || bCommittingFire || bResolvingNativeShot || IsActorBeingDestroyed() || !GetWorld() || bIsReloading)
+	{
+		return FWeaponShotResolution();
+	}
+	// Consume before interface dispatch: ReceiveDamage can synchronously reenter gameplay.
+	bHasPendingNativeShot = false;
+	TGuardValue<bool> ResolvingGuard(bResolvingNativeShot, true);
+	const UWeaponBallisticsData* Ballistics = nullptr;
+	if (IsValid(WeaponDefinition))
+	{
+		Ballistics = WeaponDefinition->BallisticsData;
+	}
+	else if (const FObjectPropertyBase* Property = FindFProperty<FObjectPropertyBase>(GetClass(), TEXT("BallisticsData")))
+	{
+		// Compatibility with the existing BP_WeaponBase field; never add a same-name native UPROPERTY.
+		Ballistics = Cast<UWeaponBallisticsData>(Property->GetObjectPropertyValue_InContainer(this));
+	}
+	return DustWeaponHit::Resolve(this, TraceStart, ShotDirection, Ballistics);
 }
 float AWeaponRuntime::GetEffectiveFireInterval() const
 {
@@ -232,6 +351,7 @@ void AWeaponRuntime::ResetRecoilPattern()
 
 void AWeaponRuntime::ResetRecoilForWeaponChange()
 {
+	bHasPendingNativeShot = false;
 	bHasCommittedSpreadProfile = false;
 	bCommittedIgnoreShotRecoil = false;
 	CommittedFiringSpread = 0.0f;
@@ -417,6 +537,7 @@ void AWeaponRuntime::CycleFireMode()
 	{
 		return;
 	}
+	bHasPendingNativeShot = false;
 	const int32 CurrentIndex = AllowedFireModes.Find(CurrentFireMode);
 	if (CurrentIndex == INDEX_NONE)
 	{
@@ -437,12 +558,56 @@ bool AWeaponRuntime::TryStartReload()
 		return false;
 	}
 
-	PendingReloadAmount = (bLockReloadAmountAtStart || bReloadOneRoundAtATime)
+	const int32 LockedAmount = (bLockReloadAmountAtStart || bReloadOneRoundAtATime)
 		? FMath::Min(ReserveAmmo, MagazineCapacity - CurrentAmmo)
 		: 0;
-	bCurrentReloadUsesPerRound = bReloadOneRoundAtATime &&
+	const bool bPerRound = bReloadOneRoundAtATime &&
 		!(bUseBatchReloadForFullEmptyReload &&
-			CurrentAmmo == 0 && PendingReloadAmount == MagazineCapacity);
+			CurrentAmmo == 0 && LockedAmount == MagazineCapacity);
+
+	StartReloadInternal(LockedAmount, bPerRound, false);
+	return true;
+}
+
+bool AWeaponRuntime::TryStartEmptyBatchReload(int32 ExpectedAmount)
+{
+	if (bIsReloading) return false;
+	// Only the explicit empty-batch definition opt-in is accepted; no per-round guessing.
+	if (!IsValid(WeaponDefinition) || !WeaponDefinition->UsesEmptyBatchReload()) return false;
+	if (CurrentAmmo != 0 || ReserveAmmo <= 0) return false;
+
+	const int32 RequiredAmount = FMath::Min(MagazineCapacity - CurrentAmmo, ReserveAmmo);
+	if (ExpectedAmount <= 0 || ExpectedAmount != RequiredAmount) return false;
+
+	// This request is forced batch (no per-round commit) for this transaction only.
+	StartReloadInternal(ExpectedAmount, false, true);
+	return true;
+}
+
+bool AWeaponRuntime::TryStartInfiniteEmptyReload()
+{
+	if (bIsReloading) return false;
+	if (!IsValid(WeaponDefinition)) return false;
+	// Ordinary Magazine and EmptyBatch are supported; a pure per-round/sniper definition is not
+	// silently converted by the enemy unlimited-source policy.
+	if (WeaponDefinition->UsesPerRoundReload() && !WeaponDefinition->UsesEmptyBatchReload()) return false;
+	// The source is unlimited, but the magazine itself must be genuinely empty and finite.
+	if (CurrentAmmo != 0) return false;
+	const int32 RefillAmount = FMath::Max(0, MagazineCapacity - CurrentAmmo);
+	if (RefillAmount <= 0) return false;
+
+	// Capture the unlimited source and exact full-magazine refill before OnReloadStarted.
+	StartReloadInternal(RefillAmount, false, false, true);
+	return true;
+}
+
+void AWeaponRuntime::StartReloadInternal(int32 InPendingAmount, bool bInPerRound,
+	bool bInEmptyBatch, bool bInInfiniteSource)
+{
+	PendingReloadAmount = InPendingAmount;
+	bCurrentReloadUsesPerRound = bInPerRound;
+	bCurrentReloadUsesEmptyBatch = bInEmptyBatch;
+	bCurrentReloadUsesInfiniteSource = bInInfiniteSource;
 
 	ReloadRequestId = (ReloadRequestId == MAX_int32)
 		? 1
@@ -451,8 +616,8 @@ bool AWeaponRuntime::TryStartReload()
 	bIsReloading = true;
 	ResetRecoilPattern();
 	OnReloadStarted.Broadcast();
-	return true;
 }
+
 bool AWeaponRuntime::FinishReload()
 {
 	if (!bIsReloading)
@@ -460,7 +625,28 @@ bool AWeaponRuntime::FinishReload()
 		return false;
 	}
 
-	if (!bCurrentReloadUsesPerRound)
+	if (bCurrentReloadUsesInfiniteSource)
+	{
+		// One full-magazine commit from the captured unlimited source. ReserveAmmo is
+		// deliberately left at its original value.
+		const int32 MissingAmmo = FMath::Max(0, MagazineCapacity - CurrentAmmo);
+		const int32 AmountToLoad = FMath::Min(FMath::Max(0, PendingReloadAmount), MissingAmmo);
+		CurrentAmmo += AmountToLoad;
+	}
+	else if (bCurrentReloadUsesEmptyBatch)
+	{
+		// The captured PendingReloadAmount is the hard upper bound; the normal ammo
+		// availability guards still prevent an overfill or a negative reserve.
+		const int32 MissingAmmo = FMath::Max(0, MagazineCapacity - CurrentAmmo);
+		const int32 AvailableAmmo = FMath::Max(0, ReserveAmmo);
+		const int32 AmountToLoad = FMath::Min(
+			FMath::Max(0, PendingReloadAmount),
+			FMath::Min(MissingAmmo, AvailableAmmo));
+
+		CurrentAmmo += AmountToLoad;
+		ReserveAmmo -= AmountToLoad;
+	}
+	else if (!bCurrentReloadUsesPerRound)
 	{
 		if (bLockReloadAmountAtStart || bReloadOneRoundAtATime)
 		{
@@ -481,6 +667,8 @@ bool AWeaponRuntime::FinishReload()
 
 	PendingReloadAmount = 0;
 	bCurrentReloadUsesPerRound = false;
+	bCurrentReloadUsesEmptyBatch = false;
+	bCurrentReloadUsesInfiniteSource = false;
 	bIsReloading = false;
 	return true;
 }
@@ -493,6 +681,8 @@ bool AWeaponRuntime::CancelReload()
 
 	PendingReloadAmount = 0;
 	bCurrentReloadUsesPerRound = false;
+	bCurrentReloadUsesEmptyBatch = false;
+	bCurrentReloadUsesInfiniteSource = false;
 	bIsReloading = false;
 	return true;
 }
@@ -503,7 +693,8 @@ int32 AWeaponRuntime::GetReloadRequestId() const
 
 bool AWeaponRuntime::TryCommitReloadRound(int32 ExpectedReloadRequestId)
 {
-	if (!bIsReloading || !bCurrentReloadUsesPerRound)
+	if (!bIsReloading || !bCurrentReloadUsesPerRound
+		|| bCurrentReloadUsesEmptyBatch || bCurrentReloadUsesInfiniteSource)
 	{
 		return false;
 	}
@@ -615,7 +806,30 @@ void AWeaponRuntime::ApplyDefinitionSettings()
 	MagazineCapacity = FMath::Max(1, D->MagazineCapacity);
 	FireInterval = FMath::Max(0.001f, NonNegative(D->FireInterval));
 	BurstShotInterval = NonNegative(D->BurstShotInterval);
-	RecoilData = D->RecoilData;
+	const UWeaponRecoilData* SourceRecoil = D->RecoilData;
+	if (D->AccuracyData && SourceRecoil && GetWorld())
+	{
+		// Private copy: recoil gameplay from the shared asset, camera from the accuracy
+		// asset. The pointer is stable across repeated Apply calls and is never saved.
+		if (!RuntimeRecoilData)
+		{
+			RuntimeRecoilData = NewObject<UWeaponRecoilData>(this, NAME_None, RF_Transient);
+		}
+		if (RuntimeRecoilData)
+		{
+			CopyRecoilSettings(*RuntimeRecoilData, *SourceRecoil);
+			CopyAccuracyCamera(*RuntimeRecoilData, *D->AccuracyData.Get());
+			RecoilData = RuntimeRecoilData;
+		}
+		else
+		{
+			RecoilData = D->RecoilData;
+		}
+	}
+	else
+	{
+		RecoilData = D->RecoilData;
+	}
 	StationarySpreadAngle = NonNegative(D->StationarySpreadAngle);
 	MovingSpreadAngle = NonNegative(D->MovingSpreadAngle);
 	JumpSpreadAngle = NonNegative(D->JumpSpreadAngle);
@@ -666,7 +880,33 @@ void AWeaponRuntime::CaptureDefinition(UWeaponDefinitionData* D) const
 	D->bLockReloadAmountAtStart = bLockReloadAmountAtStart;
 	D->bReloadOneRoundAtATime = bReloadOneRoundAtATime;
 	D->bUseBatchReloadForFullEmptyReload = bUseBatchReloadForFullEmptyReload;
-	if (RecoilData) { D->RecoilData = DuplicateObject<UWeaponRecoilData>(RecoilData, D); D->RecoilData->ClearFlags(RF_Standalone); D->RecoilData->SetFlags(RF_Public); }
+	// Effective accuracy/camera is copied into a private object so the shared accuracy
+	// asset is never written back to. Guns without AccuracyData keep the old path.
+	UWeaponAccuracyData* SourceAccuracy = WeaponDefinition ? WeaponDefinition->AccuracyData.Get() : nullptr;
+	D->AccuracyData = nullptr;
+	if (SourceAccuracy)
+	{
+		if (UWeaponAccuracyData* CapturedAccuracy = DuplicateObject<UWeaponAccuracyData>(SourceAccuracy, D))
+		{
+			CapturedAccuracy->ClearFlags(RF_Standalone | RF_Transient);
+			CapturedAccuracy->SetFlags(RF_Public);
+			D->AccuracyData = CapturedAccuracy;
+			D->HipAccuracy = SourceAccuracy->HipAccuracy;
+			D->AimAccuracy = SourceAccuracy->AimAccuracy;
+			D->bUseAimingSpread = SourceAccuracy->bUseAimingSpread;
+		}
+	}
+	UWeaponRecoilData* RecoilSource = (SourceAccuracy && WeaponDefinition && WeaponDefinition->RecoilData)
+		? WeaponDefinition->RecoilData.Get() : RecoilData.Get();
+	if (RecoilSource)
+	{
+		if (UWeaponRecoilData* CapturedRecoil = DuplicateObject<UWeaponRecoilData>(RecoilSource, D))
+		{
+			CapturedRecoil->ClearFlags(RF_Standalone | RF_Transient);
+			CapturedRecoil->SetFlags(RF_Public);
+			D->RecoilData = CapturedRecoil;
+		}
+	}
 	if (const FObjectPropertyBase* P = FindFProperty<FObjectPropertyBase>(GetClass(), TEXT("BallisticsData")))
   if (const UWeaponBallisticsData* B = Cast<UWeaponBallisticsData>(P->GetObjectPropertyValue_InContainer(this)))
    { D->BallisticsData = DuplicateObject<UWeaponBallisticsData>(B, D); D->BallisticsData->ClearFlags(RF_Standalone); D->BallisticsData->SetFlags(RF_Public); }
@@ -687,6 +927,15 @@ float AWeaponRuntime::GetCurrentTotalSpreadAngle(float CurrentHorizontalSpeed,
 }
 FWeaponSpreadProfile AWeaponRuntime::GetSpreadProfile(bool bAiming) const
 {
+	// Split accuracy asset wins whenever present; old Definitions keep the complete
+	// legacy branch below unchanged.
+	if (WeaponDefinition && WeaponDefinition->AccuracyData)
+	{
+		const UWeaponAccuracyData& Accuracy = *WeaponDefinition->AccuracyData.Get();
+		return bAiming && Accuracy.bUseAimingSpread
+			? Accuracy.AimAccuracy.BuildProfile(GetEffectiveFireInterval(), MovementSpreadSpeedThreshold)
+			: Accuracy.HipAccuracy.BuildProfile(GetEffectiveFireInterval(), MovementSpreadSpeedThreshold);
+	}
 	if (bAiming && WeaponDefinition && WeaponDefinition->bUseAimingSpread)
 		return (WeaponDefinition->HasUnifiedConfiguration() || WeaponDefinition->bUseIntuitiveAimAccuracy)
 			? WeaponDefinition->AimAccuracy.BuildProfile(GetEffectiveFireInterval(), MovementSpreadSpeedThreshold)
@@ -712,7 +961,7 @@ FWeaponSpreadProfile AWeaponRuntime::GetSpreadProfile(bool bAiming) const
 
 float AWeaponRuntime::GetFiringSpreadForProfile(bool bAiming) const
 {
-	const bool bAimProfile = bAiming && WeaponDefinition && WeaponDefinition->bUseAimingSpread;
+	const bool bAimProfile = bAiming && WeaponDefinition && WeaponDefinition->UsesAimingSpread();
 	const FWeaponSpreadProfile P = GetSpreadProfile(bAimProfile);
 	const bool bHasShot = bAimProfile ? bHasAimSpreadShot : bHasSpreadShot;
 	if (!P.bUseFiringSpread || !bHasShot || !GetWorld()) return 0.0f;

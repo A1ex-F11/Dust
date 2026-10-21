@@ -9,12 +9,12 @@
 /**
  * 
  */
-UCLASS()
+UCLASS(meta=(DisplayName="伤害计算库"))
 class UDamageLibrary : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
 	public:
-		UFUNCTION(BlueprintPure, Category = "Damage")
+		UFUNCTION(BlueprintPure, Category = "伤害")
 		static float CalculateFinalDamage(
 			float Damage,
 			FName HitBoneName,

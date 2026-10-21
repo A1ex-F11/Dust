@@ -1,4 +1,6 @@
 #include "Dust2PlayerCharacter.h"
+#include "DustEnemyVisibility.h"
+#include "DustEnemyWeaponComponent.h"
 #include "Engine/World.h"
 #include "WeaponPickupActor.h"
 #include "UObject/UnrealType.h"
@@ -9,6 +11,8 @@
 #include "Templates/UnrealTemplate.h"
 #include "WeaponPresentationComponent.h"
 #include "DustMovementAudioComponent.h"
+#include "DustRagdollDeathComponent.h"
+#include "DustDeathCameraComponent.h"
 
 ADust2PlayerCharacter::ADust2PlayerCharacter()
 {
@@ -19,6 +23,9 @@ ADust2PlayerCharacter::ADust2PlayerCharacter()
 	bDeathRequested = false;
 
 	MovementAudio = CreateDefaultSubobject<UDustMovementAudioComponent>(TEXT("MovementAudio"));
+	DeathPresentation = CreateDefaultSubobject<UDustRagdollDeathComponent>(TEXT("DeathPresentation"));
+	DeathPresentation->bAutoDestroyOwner = false;
+	DeathCamera = CreateDefaultSubobject<UDustDeathCameraComponent>(TEXT("DeathCamera"));
 }
 
 void ADust2PlayerCharacter::OnJumped_Implementation()
@@ -44,6 +51,11 @@ bool ADust2PlayerCharacter::IsDead() const
 bool ADust2PlayerCharacter::ApplyDamage(float Amount, bool& bDiedNow)
 {
 	bDiedNow = false;
+	if (bInvulnerable)
+	{
+		return false;
+	}
+
 	const float PreviousHealth = CurrentHealth;
 	const float SafeAmount = FMath::Max(0.0f, Amount);
 
@@ -61,10 +73,20 @@ bool ADust2PlayerCharacter::ApplyDamage(float Amount, bool& bDiedNow)
 		CancelAim();
 		bFireInputHeld = false;
 		ClearPendingSprintFire();
+		ClearPendingSprintAim();
+		if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(PendingSprintActionFlushTimerHandle);
 		ClearGaitIntent();
 		if (MovementAudio)
 		{
 			MovementAudio->SetMovementAudioEnabled(false);
+		}
+		// The Blueprint explicitly configures its full-body mesh after component setup. Existing
+		// health-only users remain unchanged until that setup is complete.
+		if (DeathPresentation && DeathPresentation->GetDeathMesh())
+		{
+			DeathPresentation->StartRagdollDeath();
+			if (DeathCamera && bDeathRequested && IsDead())
+				DeathCamera->BeginDeathCamera(DeathPresentation->GetDeathMesh());
 		}
 	}
 	return bHealthChanged;
@@ -84,6 +106,12 @@ bool ADust2PlayerCharacter::ApplyHeal(float Amount)
 }
 void ADust2PlayerCharacter::RestoreHealth(float SavedHealth)
 {
+	// Checkpoint placement is owned by the existing restore flow; never teleport back to the corpse.
+	if (SavedHealth > 0.0f)
+	{
+		if (DeathCamera) DeathCamera->ResetDeathCamera();
+		if (DeathPresentation) DeathPresentation->ResetDeathPresentation();
+	}
 	CancelAim();
 	bFireInputHeld = false;
 	ClearPendingSprintFire();
@@ -922,4 +950,20 @@ void ADust2PlayerCharacter::SchedulePendingSprintActionFlush()
     PendingSprintActionFlushTimerHandle =
         GetWorld()->GetTimerManager().SetTimerForNextTick(
             this, &ADust2PlayerCharacter::FlushPendingSprintActions);
+}
+
+UAISense_Sight::EVisibilityResult ADust2PlayerCharacter::CanBeSeenFrom(
+	const FCanBeSeenFromContext& Context, FVector& OutSeenLocation,
+	int32& OutNumberOfLoSChecksPerformed, int32& OutNumberOfAsyncLosCheckRequested,
+	float& OutSightStrength, int32* UserData, const FOnPendingVisibilityQueryProcessedDelegate* Delegate)
+{
+	OutNumberOfLoSChecksPerformed = 0;
+	OutNumberOfAsyncLosCheckRequested = 0;
+	const APawn* Observer = DustEnemyVisibility::ResolvePawn(Context.IgnoreActor);
+	const UDustEnemyWeaponComponent* Weapon = IsValid(Observer) ? Observer->FindComponentByClass<UDustEnemyWeaponComponent>() : nullptr;
+	OutSeenLocation = Weapon ? DustEnemyVisibility::GetAimPoint(this, Weapon->CombatProfile) : GetActorLocation();
+	const bool bVisible = DustEnemyVisibility::HasSight(Context.IgnoreActor, this,
+		Context.ObserverLocation, OutSeenLocation, &OutNumberOfLoSChecksPerformed);
+	OutSightStrength = bVisible ? 1.0f : 0.0f;
+	return bVisible ? UAISense_Sight::EVisibilityResult::Visible : UAISense_Sight::EVisibilityResult::NotVisible;
 }
