@@ -284,6 +284,7 @@ bool UDustRagdollDeathComponent::StartRagdollDeath()
 	{
 		return false;
 	}
+	SuspendHiddenMeshAfterRagdoll(OwnerCharacter, Mesh);
 
 	return true;
 }
@@ -306,6 +307,8 @@ void UDustRagdollDeathComponent::ResetDeathPresentation()
 	ACharacter* OwnerCharacter = SavedCharacter.Get();
 	if (!IsValid(OwnerCharacter) || OwnerCharacter != GetOwner())
 	{
+		SuspendedHiddenMesh.Reset();
+		bSavedHiddenMeshTickEnabled = false;
 		SavedHideVisibility.Reset();
 		bHasSavedBodyState = false;
 		bHasSavedMovementState = false;
@@ -355,6 +358,7 @@ void UDustRagdollDeathComponent::ResetDeathPresentation()
 		Mesh->SetHiddenInGame(bSavedBodyHiddenInGame, false);
 		Mesh->bPauseAnims = bSavedBodyPauseAnims;
 	}
+	RestoreHiddenMeshTick(OwnerCharacter);
 
 	for (const FVisibilitySnapshot& Snapshot : SavedHideVisibility)
 	{
@@ -399,7 +403,31 @@ void UDustRagdollDeathComponent::EndPlay(const EEndPlayReason::Type EndPlayReaso
 	CachedDeathHit = FHitResult();
 	CachedDeathDirection = FVector::ZeroVector;
 	SavedHideVisibility.Reset();
+	SuspendedHiddenMesh.Reset();
+	bSavedHiddenMeshTickEnabled = false;
 	Super::EndPlay(EndPlayReason);
+}
+
+void UDustRagdollDeathComponent::SuspendHiddenMeshAfterRagdoll(ACharacter* OwnerCharacter, USkeletalMeshComponent* DeathMesh)
+{
+	if (!bAutoDestroyOwner || !bRagdollActive || !IsValid(OwnerCharacter) || !IsValid(DeathMesh)) return;
+	USkeletalMeshComponent* HiddenMesh = OwnerCharacter->GetMesh();
+	if (!IsValid(HiddenMesh) || HiddenMesh == DeathMesh || HiddenMesh->GetOwner() != OwnerCharacter ||
+		(HiddenMesh->GetVisibleFlag() && !HiddenMesh->bHiddenInGame) || HiddenMesh->IsAnySimulatingPhysics()) return;
+	SuspendedHiddenMesh = HiddenMesh;
+	bSavedHiddenMeshTickEnabled = HiddenMesh->IsComponentTickEnabled();
+	HiddenMesh->SetComponentTickEnabled(false);
+}
+
+void UDustRagdollDeathComponent::RestoreHiddenMeshTick(ACharacter* OwnerCharacter)
+{
+	USkeletalMeshComponent* HiddenMesh = SuspendedHiddenMesh.Get();
+	if (IsValid(HiddenMesh) && HiddenMesh->GetOwner() == OwnerCharacter)
+	{
+		HiddenMesh->SetComponentTickEnabled(bSavedHiddenMeshTickEnabled);
+	}
+	SuspendedHiddenMesh.Reset();
+	bSavedHiddenMeshTickEnabled = false;
 }
 
 void UDustRagdollDeathComponent::CaptureOriginalState(ACharacter* OwnerCharacter, USkeletalMeshComponent* Mesh)

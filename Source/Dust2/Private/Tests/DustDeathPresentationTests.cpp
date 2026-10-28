@@ -19,6 +19,12 @@ struct FDustRagdollDeathTestAccess
  static float Remaining(const UDustRagdollDeathComponent* Component)
  { return Component->GetWorld()->GetTimerManager().GetTimerRemaining(Component->CorpseTimerHandle); }
  static FTimerHandle Handle(const UDustRagdollDeathComponent* Component) { return Component->CorpseTimerHandle; }
+ static void SimulateRagdollReady(UDustRagdollDeathComponent* Component, ACharacter* Owner, USkeletalMeshComponent* Body)
+ {
+  Component->bRagdollActive = true;
+  Component->SuspendHiddenMeshAfterRagdoll(Owner, Body);
+  Component->bRagdollActive = false;
+ }
 };
 
 namespace
@@ -170,6 +176,34 @@ bool FDustDeathHideRootsAndRestore::RunTest(const FString&)
  TestTrue(TEXT("Extra body restored"), ExtraBody->GetVisibleFlag() && !ExtraBody->bHiddenInGame);
  TestTrue(TEXT("Child keeps distinct original visibility"), !Child->GetVisibleFlag() && !Child->bHiddenInGame);
  TestTrue(TEXT("Leaf keeps original hidden-in-game flag"), LeafRoot->GetVisibleFlag() && LeafRoot->bHiddenInGame);
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDustDeathHiddenMeshTickRestores,
+ "Dust2.Death.HiddenMeshTickRestores", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FDustDeathHiddenMeshTickRestores::RunTest(const FString&)
+{
+ FDeathWorld Fixture;
+ if (!TestNotNull(TEXT("World"), Fixture.World)) return false;
+ ACharacter* Pawn = Fixture.World->SpawnActor<ACharacter>();
+ if (!TestNotNull(TEXT("Character"), Pawn)) return false;
+ auto* Death = Fixture.AddDeath(Pawn);
+ auto* HiddenMesh = Pawn->GetMesh();
+ auto* Body = NewObject<USkeletalMeshComponent>(Pawn);
+ Pawn->AddInstanceComponent(Body);
+ Body->SetupAttachment(Pawn->GetCapsuleComponent()); Body->RegisterComponent();
+ HiddenMesh->SetVisibility(false, false);
+ HiddenMesh->SetComponentTickEnabled(true);
+ TArray<USceneComponent*> Hide;
+ TestTrue(TEXT("Separate body configured"), Death->InitializeDeathPresentation(Body, Hide));
+ TestFalse(TEXT("Missing physics asset does not start ragdoll"), Death->StartRagdollDeath());
+ TestTrue(TEXT("Failed ragdoll leaves hidden source ticking"), HiddenMesh->IsComponentTickEnabled());
+ FDustRagdollDeathTestAccess::SimulateRagdollReady(Death, Pawn, HiddenMesh);
+ TestTrue(TEXT("Death mesh is never suspended"), HiddenMesh->IsComponentTickEnabled());
+ FDustRagdollDeathTestAccess::SimulateRagdollReady(Death, Pawn, Body);
+ TestFalse(TEXT("Hidden source stops after ragdoll takeover"), HiddenMesh->IsComponentTickEnabled());
+ Death->ResetDeathPresentation();
+ TestTrue(TEXT("Checkpoint reuse restores prior tick state"), HiddenMesh->IsComponentTickEnabled());
  return true;
 }
 #endif

@@ -91,6 +91,7 @@ private:
 	TWeakObjectPtr<UCharacterMovementComponent> SavedMovement;
 	TWeakObjectPtr<UCapsuleComponent> SavedCapsule;
 	TWeakObjectPtr<USceneComponent> SavedBodyAttachParent;
+	TWeakObjectPtr<USkeletalMeshComponent> SuspendedHiddenMesh;
 	FName SavedBodyAttachSocket = NAME_None;
 	FTransform SavedBodyRelativeTransform = FTransform::Identity;
 	FName SavedBodyCollisionProfile = NAME_None;
@@ -105,6 +106,7 @@ private:
 	bool bSavedBodyVisible = true;
 	bool bSavedBodyHiddenInGame = false;
 	bool bSavedBodyPauseAnims = false;
+	bool bSavedHiddenMeshTickEnabled = false;
 	bool bSavedBodyHadAttachParent = false;
 	bool bHasSavedBodyState = false;
 	bool bHasSavedMovementState = false;
@@ -124,6 +126,8 @@ private:
 	void CaptureHideVisibility(ACharacter* OwnerCharacter);
 	void HideConfiguredComponents(ACharacter* OwnerCharacter, uint64 ExpectedGeneration);
 	void StopOwnerActivities(ACharacter* OwnerCharacter, uint64 ExpectedGeneration);
+	void SuspendHiddenMeshAfterRagdoll(ACharacter* OwnerCharacter, USkeletalMeshComponent* DeathMesh);
+	void RestoreHiddenMeshTick(ACharacter* OwnerCharacter);
 	bool ConfigureBodyCollisionForDeath(USkeletalMeshComponent* Mesh, ACharacter* OwnerCharacter, uint64 ExpectedGeneration);
 	void ScheduleCorpseCleanup(uint64 ExpectedGeneration);
 	void ClearCorpseTimer();
