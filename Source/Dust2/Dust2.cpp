@@ -1,7 +1,7 @@
 #include "Dust2.h"
 #include "Modules/ModuleManager.h"
 #if WITH_EDITOR
-#include "WeaponDetailsCustomization.h"
+#include "Private/Editor/WeaponDetailsCustomization.h"
 #endif
 
 class FDust2Module : public FDefaultGameModuleImpl
