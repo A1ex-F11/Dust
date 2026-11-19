@@ -11,7 +11,10 @@ DerivedDataCache/
 
 # Source-only repository scope
 Content/
-Plugins/
+# Third-party plugins stay out of source control. WeaponKit is first-party source.
+Plugins/*
+!Plugins/WeaponKit/
+!Plugins/WeaponKit/**
 Config/DefaultEditorPerProjectUserSettings.ini
 
 # Local credentials and temporary files
